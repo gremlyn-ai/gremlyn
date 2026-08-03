@@ -1,0 +1,40 @@
+version: 1
+mode: shield
+
+servers:
+  postgres:
+    mode: proxy
+    upstream: http://localhost:5433/mcp
+    rules:
+      - name: select-only
+        match:
+          tool: "query"
+          args.sql: { must_start_with: "SELECT" }
+        action: block
+
+      - name: no-sensitive-columns
+        match:
+          tool: "query"
+          args.sql: { not_contains: ["password", "ssn", "card_number", "api_key", "secret_key"] }
+        action: block_and_alert
+
+      - name: no-dml-statements
+        match:
+          tool: "query"
+          args.sql: { not_contains: ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "TRUNCATE"] }
+        action: block
+
+      - name: no-system-catalog-access
+        match:
+          tool: "query"
+          args.sql: { not_contains: ["information_schema", "pg_catalog"] }
+        action: block
+
+      - name: scan-response-injections
+        scan_responses: true
+        detect: ["prompt_injection"]
+        action: block_and_alert
+
+global:
+  max_payload_size: 1MB
+  alert_channels: []

@@ -1,0 +1,29 @@
+{
+  "env": {
+    "CLAUDE_CODE_EFFORT_LEVEL": "high"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "for f in $CLAUDE_FILE_PATHS; do case \"$f\" in *.env|*.env.local|*credentials*|*.key|*.pem|*secrets*) echo \"BLOCKED: Cannot edit sensitive file: $f\"; exit 2;; */reference/*.html) echo \"BLOCKED: reference/*.html is the read-only design source of truth: $f\"; exit 2;; esac; done"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "for f in $CLAUDE_FILE_PATHS; do case \"$f\" in *.go) gofmt -w \"$f\" 2>/dev/null; command -v goimports >/dev/null && goimports -w \"$f\" 2>/dev/null;; *.ts|*.tsx) (cd /home/sahra/Documents/sahra-perso/gremlyn/gremlyn-dashboard && npx eslint --fix \"$f\" 2>/dev/null) || true;; esac; done; exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}

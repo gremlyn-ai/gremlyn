@@ -1,0 +1,164 @@
+@import "tailwindcss";
+
+/* ── GREMLYN_OS Design System — Tailwind CSS 4 Theme ── */
+@theme inline {
+  /* Surface colors */
+  --color-surface-container-lowest: #000000;
+  --color-background: #0e0e0e;
+  --color-surface: #0e0e0e;
+  --color-surface-dim: #0e0e0e;
+  --color-surface-container-low: #131313;
+  --color-surface-container: #1a1919;
+  --color-surface-container-high: #201f1f;
+  --color-surface-container-highest: #262626;
+  --color-surface-variant: #262626;
+  --color-surface-bright: #2c2c2c;
+  --color-surface-tint: #8eff71;
+  --color-inverse-surface: #fcf8f8;
+  --color-inverse-on-surface: #565554;
+
+  /* Primary (Shield green) */
+  --color-primary: #8eff71;
+  --color-primary-dim: #2be800;
+  --color-primary-fixed: #2ff801;
+  --color-primary-fixed-dim: #2be800;
+  --color-primary-container: #2ff801;
+  --color-on-primary: #0d6100;
+  --color-on-primary-fixed: #064200;
+  --color-on-primary-fixed-variant: #0d6200;
+  --color-on-primary-container: #0b5800;
+  --color-inverse-primary: #106f00;
+
+  /* Secondary (Arena red) */
+  --color-secondary: #ff7168;
+  --color-secondary-dim: #e2242a;
+  --color-secondary-fixed: #ffc3bd;
+  --color-secondary-fixed-dim: #ffafa8;
+  --color-secondary-container: #c00018;
+  --color-on-secondary: #4a0004;
+  --color-on-secondary-container: #fff6f4;
+  --color-on-secondary-fixed: #700009;
+  --color-on-secondary-fixed-variant: #a60013;
+
+  /* Tertiary */
+  --color-tertiary: #83ff95;
+  --color-tertiary-dim: #3be66b;
+  --color-tertiary-fixed: #4ef577;
+  --color-tertiary-fixed-dim: #3be66b;
+  --color-tertiary-container: #4ef577;
+  --color-on-tertiary: #006124;
+  --color-on-tertiary-container: #005720;
+  --color-on-tertiary-fixed: #004216;
+  --color-on-tertiary-fixed-variant: #006225;
+
+  /* Error */
+  --color-error: #ff7351;
+  --color-error-dim: #d53d18;
+  --color-error-container: #b92902;
+  --color-on-error: #450900;
+  --color-on-error-container: #ffd2c8;
+
+  /* Neutral / text */
+  --color-on-surface: #ffffff;
+  --color-on-surface-variant: #adaaaa;
+  --color-on-background: #ffffff;
+  --color-outline: #777575;
+  --color-outline-variant: #494847;
+
+  /* Font families */
+  --font-headline: "Space Grotesk", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-label: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* Border radius: 0px everywhere */
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+  --radius-full: 9999px;
+}
+
+/* ── Material Symbols ── */
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+  vertical-align: middle;
+}
+
+/* ── Scanline overlay (Shield = green tint) ── */
+.scanline-shield {
+  background: linear-gradient(
+    to bottom,
+    transparent 50%,
+    rgba(142, 255, 113, 0.02) 50%
+  );
+  background-size: 100% 4px;
+  pointer-events: none;
+}
+
+/* ── Scanline overlay (Arena = dark tint) ── */
+.scanline-arena {
+  background: linear-gradient(to bottom, transparent 50%, rgba(0, 0, 0, 0.1) 50%);
+  background-size: 100% 4px;
+  pointer-events: none;
+}
+
+/* ── Custom range slider thumb (Arena secondary color) ── */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 20px;
+  width: 20px;
+  background: #ff7168;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+input[type="range"]::-moz-range-thumb {
+  height: 20px;
+  width: 20px;
+  background: #ff7168;
+  cursor: pointer;
+  border-radius: 0;
+  border: none;
+}
+
+/* ── Toggle switch (flat, no rounded) ── */
+.toggle-track {
+  position: relative;
+  display: inline-flex;
+  height: 1.25rem;
+  width: 2.5rem;
+  flex-shrink: 0;
+  cursor: pointer;
+  align-items: center;
+  transition: background-color 150ms;
+}
+
+.toggle-thumb {
+  display: inline-block;
+  height: 0.75rem;
+  width: 0.75rem;
+  transition: transform 150ms;
+}
+
+/* ── Base body ── */
+body {
+  background: #000000;
+  color: #ffffff;
+  font-family: "Inter", sans-serif;
+}
+
+/* ── Selection colors ── */
+::selection {
+  background: #8eff71;
+  color: #0d6100;
+}
+
+.selection-secondary::selection {
+  background: #ff7168;
+  color: #4a0004;
+}

@@ -1,0 +1,41 @@
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - unconvert
+    - gocritic
+    - revive
+    - noctx          # détecte les appels HTTP sans context.Context
+    - bodyclose      # détecte les body HTTP non fermés
+    - exhaustive     # force tous les cas dans un switch sur enum
+    - errorlint      # vérifie le bon usage de %w et errors.Is/As
+    - prealloc       # suggère les pré-allocations de slices
+
+linters-settings:
+  revive:
+    rules:
+      - name: exported
+        arguments:
+          - "checkPrivateReceivers"
+      - name: unexported-return
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+  exhaustive:
+    default-signifies-exhaustive: true
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m

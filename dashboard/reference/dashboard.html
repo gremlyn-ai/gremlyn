@@ -1,0 +1,753 @@
+<!-- Gremlyn Shield - Dashboard -->
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>GREMLYN_OS // SHIELD_DASHBOARD</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-primary-fixed": "#064200",
+                        "tertiary-fixed-dim": "#3be66b",
+                        "surface-container": "#1a1919",
+                        "on-primary-fixed-variant": "#0d6200",
+                        "surface-container-lowest": "#000000",
+                        "error-container": "#b92902",
+                        "on-tertiary-container": "#005720",
+                        "error": "#ff7351",
+                        "on-tertiary-fixed-variant": "#006225",
+                        "tertiary": "#83ff95",
+                        "on-secondary-container": "#fff6f4",
+                        "tertiary-fixed": "#4ef577",
+                        "primary-fixed-dim": "#2be800",
+                        "primary-fixed": "#2ff801",
+                        "on-primary-container": "#0b5800",
+                        "surface-container-low": "#131313",
+                        "inverse-on-surface": "#565554",
+                        "surface-container-high": "#201f1f",
+                        "primary-dim": "#2be800",
+                        "background": "#0e0e0e",
+                        "secondary-fixed-dim": "#ffafa8",
+                        "on-error": "#450900",
+                        "outline": "#777575",
+                        "surface-bright": "#2c2c2c",
+                        "primary-container": "#2ff801",
+                        "tertiary-container": "#4ef577",
+                        "on-secondary": "#4a0004",
+                        "on-error-container": "#ffd2c8",
+                        "surface-variant": "#262626",
+                        "secondary-container": "#c00018",
+                        "on-surface-variant": "#adaaaa",
+                        "inverse-primary": "#106f00",
+                        "primary": "#8eff71",
+                        "on-secondary-fixed": "#700009",
+                        "tertiary-dim": "#3be66b",
+                        "on-surface": "#ffffff",
+                        "on-primary": "#0d6100",
+                        "inverse-surface": "#fcf8f8",
+                        "surface": "#0e0e0e",
+                        "on-background": "#ffffff",
+                        "secondary-fixed": "#ffc3bd",
+                        "secondary-dim": "#e2242a",
+                        "on-tertiary-fixed": "#004216",
+                        "error-dim": "#d53d18",
+                        "secondary": "#ff7168",
+                        "surface-tint": "#8eff71",
+                        "surface-container-highest": "#262626",
+                        "surface-dim": "#0e0e0e",
+                        "outline-variant": "#494847",
+                        "on-secondary-fixed-variant": "#a60013",
+                        "on-tertiary": "#006124"
+                    },
+                    fontFamily: {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["JetBrains Mono"]
+                    },
+                    borderRadius: {"DEFAULT": "0rem", "lg": "0rem", "xl": "0rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .scanline {
+            background: linear-gradient(to bottom, transparent 50%, rgba(142, 255, 113, 0.02) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="bg-surface-container-lowest text-on-surface font-body selection:bg-primary selection:text-on-primary overflow-x-hidden">
+<div class="fixed inset-0 scanline z-50 pointer-events-none"></div>
+<!-- Sidebar (SideNavBar Shared Component) -->
+<aside class="fixed left-0 top-0 h-full flex flex-col z-40 bg-[#000000] w-64 border-r-0 font-['JetBrains_Mono'] text-xs uppercase tracking-tight">
+<div class="p-6 mb-8">
+<div class="flex items-center gap-3">
+<div class="relative w-12 h-12 bg-surface-container-low flex items-center justify-center">
+<img class="w-10 h-10 object-contain" data-alt="Gremlyn Mascot Eye glowing vibrant green" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCe894or9zJgyD5XZQNWcNGjeldPWqDY6ONuj10J3MziEjI0olmQFC1oH2r68N_hiQ_A9lmNvE1nFuu_u3Hf2FOL66-zjktBQpIYvgBJglYD2Noi1lvwIu7Ayyeax_ESrNNT80-5Sy4BTThA0BFgcBzu_GDu5ilq91l8OH0xu-LfKno9SCk0uJy1gItXKQXxePDJpwfn8DINHu8q2AODS4UCbIjcoVx1uoBCGnuugv6ahjZY4C3hoAwOWC3zqw7CxR10WfLZImSZqrd"/>
+</div>
+<div>
+<h1 class="text-[#8eff71] font-bold text-lg leading-none">GREMLYN_SYS</h1>
+<p class="text-[#555555] text-[10px] mt-1">v4.0.2_ACTIVE</p>
+</div>
+</div>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="group flex items-center px-6 py-4 transition-all duration-150 text-[#555555] hover:text-[#8eff71] hover:bg-[#131313]" href="#">
+<span class="material-symbols-outlined mr-4 group-hover:translate-x-1 transition-transform">bolt</span>
+                Arena
+            </a>
+<a class="group flex items-center px-6 py-4 transition-all duration-150 bg-[#262626] text-[#8eff71] border-l-4 border-[#8eff71]" href="#">
+<span class="material-symbols-outlined mr-4 group-hover:translate-x-1 transition-transform" style="font-variation-settings: 'FILL' 1;">shield</span>
+                Shield
+            </a>
+<a class="group flex items-center px-6 py-4 transition-all duration-150 text-[#555555] hover:text-[#8eff71] hover:bg-[#131313]" href="#">
+<span class="material-symbols-outlined mr-4 group-hover:translate-x-1 transition-transform">settings</span>
+                Settings
+            </a>
+<a class="group flex items-center px-6 py-4 transition-all duration-150 text-[#555555] hover:text-[#8eff71] hover:bg-[#131313]" href="#">
+<span class="material-symbols-outlined mr-4 group-hover:translate-x-1 transition-transform">description</span>
+                Docs
+            </a>
+</nav>
+<div class="p-6">
+<button class="w-full py-4 bg-primary text-on-primary font-bold tracking-widest text-xs hover:shadow-[0_0_15px_rgba(142,255,113,0.4)] transition-all active:scale-95">
+                INITIATE_BREACH
+            </button>
+</div>
+<div class="mt-auto border-t border-outline-variant/10 p-2">
+<a class="flex items-center px-4 py-3 text-[#555555] hover:text-[#8eff71] transition-colors" href="#">
+<span class="material-symbols-outlined mr-4 text-sm">code</span>
+                System_Logs
+            </a>
+<a class="flex items-center px-4 py-3 text-[#555555] hover:text-[#8eff71] transition-colors" href="#">
+<span class="material-symbols-outlined mr-4 text-sm">logout</span>
+                Logout
+            </a>
+</div>
+</aside>
+<!-- Main Canvas -->
+<main class="ml-64 min-h-screen bg-surface flex flex-col">
+<!-- TopAppBar (Derived from TopNavBar Shared Component) -->
+<header class="flex justify-between items-center w-full px-8 h-16 bg-[#0e0e0e] border-b-0 sticky top-0 z-30">
+<div class="flex items-center gap-8">
+<h2 class="text-2xl font-black text-[#8eff71] tracking-tighter font-headline uppercase">GREMLYN_OS</h2>
+<div class="hidden md:flex items-center gap-6 font-headline uppercase tracking-widest text-sm">
+<span class="flex items-center gap-2 text-primary">
+<span class="w-2 h-2 bg-primary animate-pulse"></span>
+                        Shield_Active
+                    </span>
+<span class="text-on-surface-variant">Vitals: <span class="text-on-surface">Stable</span></span>
+<span class="text-on-surface-variant">Nodes: <span class="text-on-surface">1,024</span></span>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="bg-surface-container-low px-4 py-1.5 flex items-center gap-3 border border-outline-variant/20">
+<span class="material-symbols-outlined text-primary text-sm">terminal</span>
+<span class="font-mono text-[10px] text-on-surface-variant">USER@ROOT_ACCESS: OK</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</div>
+</header>
+<!-- Content Area -->
+<section class="p-8 space-y-8">
+<!-- Header Section -->
+<div class="flex justify-between items-end border-b border-outline-variant/10 pb-6">
+<div>
+<h3 class="font-headline text-4xl font-bold tracking-tight text-on-surface">SHIELD_DASHBOARD</h3>
+<p class="text-on-surface-variant font-mono text-sm mt-1 uppercase tracking-tighter">Real-time threat mitigation and agent orchestration</p>
+</div>
+<div class="flex gap-2">
+<button class="bg-surface-container-highest text-primary px-4 py-2 font-mono text-xs border border-primary/20 hover:bg-primary hover:text-on-primary transition-all">
+                        EXPORT_LOGS
+                    </button>
+<button class="bg-primary text-on-primary px-4 py-2 font-mono text-xs font-bold hover:shadow-[0_0_10px_rgba(142,255,113,0.3)] transition-all">
+                        NEW_POLICY
+                    </button>
+</div>
+</div>
+<!-- Bento Metrics Row -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+<div class="bg-surface-container-low p-6 border-l-2 border-primary">
+<div class="flex justify-between items-start mb-4">
+<span class="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Blocked (24h)</span>
+<span class="material-symbols-outlined text-primary text-sm">security</span>
+</div>
+<div class="flex items-end gap-2">
+<span class="text-4xl font-headline font-bold text-on-surface leading-none">12,482</span>
+<span class="text-primary text-xs font-mono mb-1">+14%</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-6 border-l-2 border-tertiary">
+<div class="flex justify-between items-start mb-4">
+<span class="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Agents Protected</span>
+<span class="material-symbols-outlined text-tertiary text-sm">groups</span>
+</div>
+<div class="flex items-end gap-2">
+<span class="text-4xl font-headline font-bold text-on-surface leading-none">842</span>
+<span class="text-on-surface-variant text-xs font-mono mb-1">/ 1,024</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-6 border-l-2 border-outline-variant">
+<div class="flex justify-between items-start mb-4">
+<span class="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Servers</span>
+<span class="material-symbols-outlined text-on-surface-variant text-sm">dns</span>
+</div>
+<div class="flex items-end gap-2">
+<span class="text-4xl font-headline font-bold text-on-surface leading-none">56</span>
+<span class="text-on-surface-variant text-xs font-mono mb-1">nodes</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-6 border-l-2 border-primary">
+<div class="flex justify-between items-start mb-4">
+<span class="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Uptime</span>
+<span class="material-symbols-outlined text-primary text-sm" style="font-variation-settings: 'FILL' 1;">timer</span>
+</div>
+<div class="flex items-end gap-2">
+<span class="text-4xl font-headline font-bold text-on-surface leading-none">99.98</span>
+<span class="text-on-surface-variant text-xs font-mono mb-1">%</span>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- Last Threat Card -->
+<div class="lg:col-span-2 bg-surface-container-low relative overflow-hidden flex flex-col h-full group">
+<div class="absolute top-0 right-0 p-4">
+<span class="bg-error/10 text-error px-3 py-1 text-[10px] font-mono font-bold border border-error/30 uppercase tracking-widest">CRITICAL_EVENT</span>
+</div>
+<div class="p-8">
+<h4 class="font-headline text-2xl font-bold mb-1 uppercase">LATEST_BLOCKED_THREAT</h4>
+<p class="font-mono text-xs text-on-surface-variant mb-6">UUID: 4a2b-91ff-0012-ac56</p>
+<div class="grid grid-cols-2 md:grid-cols-3 gap-8 mb-8">
+<div>
+<p class="text-[10px] font-mono text-on-surface-variant mb-1 uppercase tracking-widest">Attack Type</p>
+<p class="font-body font-bold text-on-surface">Distributed SQL Injection</p>
+</div>
+<div>
+<p class="text-[10px] font-mono text-on-surface-variant mb-1 uppercase tracking-widest">Source IP</p>
+<p class="font-mono font-bold text-primary">192.168.1.45 [MASKED]</p>
+</div>
+<div>
+<p class="text-[10px] font-mono text-on-surface-variant mb-1 uppercase tracking-widest">Detection Vector</p>
+<p class="font-body font-bold text-on-surface">Neural_Heuristic_V4</p>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-6 border-l border-error/40 font-mono text-[11px] text-on-surface-variant leading-relaxed">
+<span class="text-error">[DETECTED]</span> 04:12:01.002 - Anomalous pattern in /api/v1/auth/provision<br/>
+<span class="text-error">[ANALYSIS]</span> 04:12:01.244 - Payload contains 'UNION SELECT' across 12 distributed nodes<br/>
+<span class="text-primary">[SHIELDED]</span> 04:12:01.246 - Packet drop successful. Source IP throttled.
+                        </div>
+</div>
+<div class="mt-auto p-8 pt-0 flex gap-4">
+<button class="bg-primary text-on-primary px-6 py-3 font-mono font-bold text-sm flex items-center gap-3 hover:shadow-[0_0_20px_rgba(142,255,113,0.3)] transition-all">
+<span class="material-symbols-outlined">play_circle</span>
+                            REPLAY_ATTACK
+                        </button>
+<button class="bg-surface-container-highest text-on-surface px-6 py-3 font-mono font-bold text-sm border border-outline-variant/30 hover:border-primary/50 transition-all">
+                            GENERATE_REPORT
+                        </button>
+</div>
+</div>
+<!-- Mini Chart Card -->
+<div class="bg-surface-container-low p-8 flex flex-col">
+<div class="flex justify-between items-center mb-6">
+<h4 class="font-headline text-lg font-bold uppercase tracking-tight">Threat_Vectors_7D</h4>
+<span class="material-symbols-outlined text-primary">monitoring</span>
+</div>
+<div class="flex-1 flex items-end justify-between gap-1 h-48 mb-6">
+<div class="w-full bg-primary/20 group relative" style="height: 65%;">
+<div class="absolute inset-x-0 bottom-0 bg-primary group-hover:bg-tertiary transition-colors h-full"></div>
+</div>
+<div class="w-full bg-primary/20 group relative" style="height: 45%;">
+<div class="absolute inset-x-0 bottom-0 bg-primary group-hover:bg-tertiary transition-colors h-full"></div>
+</div>
+<div class="w-full bg-primary/20 group relative" style="height: 85%;">
+<div class="absolute inset-x-0 bottom-0 bg-primary group-hover:bg-tertiary transition-colors h-full"></div>
+</div>
+<div class="w-full bg-primary/20 group relative" style="height: 55%;">
+<div class="absolute inset-x-0 bottom-0 bg-primary group-hover:bg-tertiary transition-colors h-full"></div>
+</div>
+<div class="w-full bg-primary/20 group relative" style="height: 95%;">
+<div class="absolute inset-x-0 bottom-0 bg-primary group-hover:bg-tertiary transition-colors h-full"></div>
+</div>
+<div class="w-full bg-primary/20 group relative" style="height: 70%;">
+<div class="absolute inset-x-0 bottom-0 bg-primary group-hover:bg-tertiary transition-colors h-full"></div>
+</div>
+<div class="w-full bg-primary/20 group relative" style="height: 80%;">
+<div class="absolute inset-x-0 bottom-0 bg-primary group-hover:bg-tertiary transition-colors h-full"></div>
+</div>
+</div>
+<div class="flex justify-between font-mono text-[9px] text-on-surface-variant uppercase tracking-widest px-1">
+<span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+</div>
+<div class="mt-6 pt-6 border-t border-outline-variant/10">
+<div class="flex justify-between items-center text-sm">
+<span class="text-on-surface-variant">Weekly Avg</span>
+<span class="font-mono text-primary font-bold">14.2k blocks/day</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Active Rules List -->
+<div class="bg-surface-container-low overflow-hidden">
+<div class="p-6 border-b border-outline-variant/10 flex justify-between items-center">
+<h4 class="font-headline text-xl font-bold uppercase tracking-tight">ACTIVE_ENFORCEMENT_RULES</h4>
+<div class="flex items-center gap-4">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">search</span>
+<input class="bg-surface-container-lowest border-0 text-[10px] font-mono py-2 pl-9 pr-4 w-48 focus:ring-1 focus:ring-primary" placeholder="FILTER RULES..." type="text"/>
+</div>
+<span class="text-xs text-on-surface-variant font-mono">24 ACTIVE</span>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left font-mono text-xs">
+<thead>
+<tr class="text-on-surface-variant border-b border-outline-variant/10 uppercase tracking-widest">
+<th class="p-6 font-medium">Policy Name</th>
+<th class="p-6 font-medium">Trigger</th>
+<th class="p-6 font-medium">Action</th>
+<th class="p-6 font-medium">Hits (24h)</th>
+<th class="p-6 font-medium text-right">Enforcement</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/5">
+<tr class="hover:bg-surface-container-high transition-colors group">
+<td class="p-6 font-bold text-on-surface">ROOT_SHIELD_01</td>
+<td class="p-6 text-on-surface-variant">AUTH_FAILURE_BURST &gt; 5</td>
+<td class="p-6"><span class="bg-primary/10 text-primary px-2 py-0.5 border border-primary/20">DROP_PACKET</span></td>
+<td class="p-6 text-on-surface">4,201</td>
+<td class="p-6 text-right">
+<button class="relative inline-flex h-5 w-10 shrink-0 cursor-pointer items-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary">
+<span class="translate-x-5 inline-block h-3 w-3 bg-on-primary transition-transform"></span>
+</button>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-high transition-colors group">
+<td class="p-6 font-bold text-on-surface">GEO_FENCE_CHINA</td>
+<td class="p-6 text-on-surface-variant">LOC_ID == "CN"</td>
+<td class="p-6"><span class="bg-primary/10 text-primary px-2 py-0.5 border border-primary/20">THROTTLE_50</span></td>
+<td class="p-6 text-on-surface">8,922</td>
+<td class="p-6 text-right">
+<button class="relative inline-flex h-5 w-10 shrink-0 cursor-pointer items-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary">
+<span class="translate-x-5 inline-block h-3 w-3 bg-on-primary transition-transform"></span>
+</button>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-high transition-colors group">
+<td class="p-6 font-bold text-on-surface">XSS_ESCAPE_NEURAL</td>
+<td class="p-1 text-on-surface-variant font-mono p-6">REGEX_MATCH(PAYLOAD, neural_xss_v2)</td>
+<td class="p-6"><span class="bg-error/10 text-error px-2 py-0.5 border border-error/20">QUARANTINE</span></td>
+<td class="p-6 text-on-surface">112</td>
+<td class="p-6 text-right">
+<button class="relative inline-flex h-5 w-10 shrink-0 cursor-pointer items-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary">
+<span class="translate-x-5 inline-block h-3 w-3 bg-on-primary transition-transform"></span>
+</button>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-high transition-colors group">
+<td class="p-6 font-bold text-on-surface">LEGACY_TLS_BLOCK</td>
+<td class="p-6 text-on-surface-variant">TLS_VER &lt; 1.2</td>
+<td class="p-6"><span class="bg-primary/10 text-primary px-2 py-0.5 border border-primary/20">REDIRECT_TLS13</span></td>
+<td class="p-6 text-on-surface">0</td>
+<td class="p-6 text-right">
+<button class="relative inline-flex h-5 w-10 shrink-0 cursor-pointer items-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-surface-container-highest">
+<span class="translate-x-1 inline-block h-3 w-3 bg-on-surface-variant transition-transform"></span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<!-- Footer / Status Bar -->
+<footer class="mt-auto bg-surface-container-lowest border-t border-outline-variant/10 px-8 py-3 flex justify-between items-center text-[10px] font-mono text-on-surface-variant">
+<div class="flex gap-6">
+<span>SYSTEM_STATUS: <span class="text-primary font-bold">NOMINAL</span></span>
+<span>LATENCY: <span class="text-primary font-bold">12ms</span></span>
+<span>UPLINK: <span class="text-primary font-bold">ENCRYPTED_AES256</span></span>
+</div>
+<div class="flex gap-4 items-center">
+<span>THREAD_POOL: 2,492/4,000</span>
+<div class="w-32 h-1 bg-surface-container-high overflow-hidden">
+<div class="bg-primary h-full w-3/5"></div>
+</div>
+</div>
+</footer>
+</main>
+</body></html>
+
+<!-- Gremlyn Arena - New Session -->
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>GREMLYN_OS | Arena Session</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-primary-fixed": "#064200",
+                        "tertiary-fixed-dim": "#3be66b",
+                        "surface-container": "#1a1919",
+                        "on-primary-fixed-variant": "#0d6200",
+                        "surface-container-lowest": "#000000",
+                        "error-container": "#b92902",
+                        "on-tertiary-container": "#005720",
+                        "error": "#ff7351",
+                        "on-tertiary-fixed-variant": "#006225",
+                        "tertiary": "#83ff95",
+                        "on-secondary-container": "#fff6f4",
+                        "tertiary-fixed": "#4ef577",
+                        "primary-fixed-dim": "#2be800",
+                        "primary-fixed": "#2ff801",
+                        "on-primary-container": "#0b5800",
+                        "surface-container-low": "#131313",
+                        "inverse-on-surface": "#565554",
+                        "surface-container-high": "#201f1f",
+                        "primary-dim": "#2be800",
+                        "background": "#0e0e0e",
+                        "secondary-fixed-dim": "#ffafa8",
+                        "on-error": "#450900",
+                        "outline": "#777575",
+                        "surface-bright": "#2c2c2c",
+                        "primary-container": "#2ff801",
+                        "tertiary-container": "#4ef577",
+                        "on-secondary": "#4a0004",
+                        "on-error-container": "#ffd2c8",
+                        "surface-variant": "#262626",
+                        "secondary-container": "#c00018",
+                        "on-surface-variant": "#adaaaa",
+                        "inverse-primary": "#106f00",
+                        "primary": "#8eff71",
+                        "on-secondary-fixed": "#700009",
+                        "tertiary-dim": "#3be66b",
+                        "on-surface": "#ffffff",
+                        "on-primary": "#0d6100",
+                        "inverse-surface": "#fcf8f8",
+                        "surface": "#0e0e0e",
+                        "on-background": "#ffffff",
+                        "secondary-fixed": "#ffc3bd",
+                        "secondary-dim": "#e2242a",
+                        "on-tertiary-fixed": "#004216",
+                        "error-dim": "#d53d18",
+                        "secondary": "#ff7168",
+                        "surface-tint": "#8eff71",
+                        "surface-container-highest": "#262626",
+                        "surface-dim": "#0e0e0e",
+                        "outline-variant": "#494847",
+                        "on-secondary-fixed-variant": "#a60013",
+                        "on-tertiary": "#006124"
+                    },
+                    fontFamily: {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["JetBrains Mono"]
+                    },
+                    borderRadius: {"DEFAULT": "0px", "lg": "0px", "xl": "0px", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .scanline {
+            background: linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.1) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 20px;
+            width: 20px;
+            background: #ff7168;
+            cursor: pointer;
+            border-radius: 0;
+        }
+    </style>
+</head>
+<body class="bg-surface-container-lowest text-on-surface font-body selection:bg-secondary selection:text-on-secondary">
+<!-- Global Layout Shell -->
+<div class="flex min-h-screen">
+<!-- SideNavBar Component -->
+<aside class="fixed left-0 top-0 h-full flex flex-col z-40 bg-[#000000] w-64 border-r-0">
+<div class="p-6 flex items-center gap-3">
+<div class="w-10 h-10 bg-surface-container-highest flex items-center justify-center relative overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="Gremlyn mascot with a sharp red glowing eye" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDOaUx0vlZ_Q7cVmBlO4wsxaPR1KjrVI0R9UhkBhcRHTPDsQZ8Kk0HutGy7npi6hnojVqEY0KlyhsxeiOD4m7GptSXhntItHluqobaPwVS0RkvVjrwpnYZPfXf6s8vlEb1kFaoxgwfoTMtzbQsA0ASGWlKvLn9y7oJtLUY2iwI9CH__G7QFD4ekJv8rJsPhn155SANV5d72DbEmDiNGkVhJGrboQ2LgO5AngSWqvkePOaXxVJaEXN_OybdZuRXPFspqJgAwL1Z75clR"/>
+<div class="absolute inset-0 bg-secondary/10"></div>
+</div>
+<div>
+<h1 class="font-headline font-bold text-primary tracking-tighter text-lg">GREMLYN_SYS</h1>
+<p class="font-mono text-[10px] text-on-surface-variant uppercase tracking-tight">v4.0.2_ACTIVE</p>
+</div>
+</div>
+<nav class="flex-1 px-4 mt-8 space-y-2">
+<!-- Arena Active -->
+<a class="group flex items-center gap-4 px-4 py-3 bg-[#262626] text-secondary border-l-4 border-secondary transition-all duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="bolt">bolt</span>
+<span class="font-mono text-xs uppercase tracking-tight group-hover:translate-x-1 transition-transform">Arena</span>
+</a>
+<a class="group flex items-center gap-4 px-4 py-3 text-[#555555] hover:text-primary transition-all duration-150 hover:bg-[#131313]" href="#">
+<span class="material-symbols-outlined" data-icon="shield">shield</span>
+<span class="font-mono text-xs uppercase tracking-tight group-hover:translate-x-1 transition-transform">Shield</span>
+</a>
+<a class="group flex items-center gap-4 px-4 py-3 text-[#555555] hover:text-primary transition-all duration-150 hover:bg-[#131313]" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-mono text-xs uppercase tracking-tight group-hover:translate-x-1 transition-transform">Settings</span>
+</a>
+<a class="group flex items-center gap-4 px-4 py-3 text-[#555555] hover:text-primary transition-all duration-150 hover:bg-[#131313]" href="#">
+<span class="material-symbols-outlined" data-icon="description">description</span>
+<span class="font-mono text-xs uppercase tracking-tight group-hover:translate-x-1 transition-transform">Docs</span>
+</a>
+</nav>
+<div class="p-4 space-y-4">
+<button class="w-full bg-secondary py-3 text-on-secondary font-mono text-xs font-bold tracking-widest hover:opacity-90 active:scale-95 transition-all">
+                    INITIATE_BREACH
+                </button>
+<div class="border-t border-outline-variant/10 pt-4 space-y-2">
+<a class="flex items-center gap-4 px-4 py-2 text-[#555555] font-mono text-[10px] uppercase hover:text-primary" href="#">
+<span class="material-symbols-outlined text-sm" data-icon="code">code</span>
+                        System_Logs
+                    </a>
+<a class="flex items-center gap-4 px-4 py-2 text-[#555555] font-mono text-[10px] uppercase hover:text-secondary" href="#">
+<span class="material-symbols-outlined text-sm" data-icon="logout">logout</span>
+                        Logout
+                    </a>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 ml-64 bg-background relative">
+<div class="scanline absolute inset-0 opacity-5"></div>
+<!-- TopNavBar Component -->
+<header class="flex justify-between items-center w-full px-8 h-16 bg-[#0e0e0e] relative z-10 border-b border-outline-variant/5">
+<div class="flex items-center gap-8">
+<div class="flex items-center gap-3">
+<span class="w-2 h-2 bg-secondary animate-pulse"></span>
+<h2 class="font-headline font-black text-secondary tracking-tighter text-xl uppercase">GREMLYN_OS</h2>
+</div>
+<nav class="hidden md:flex items-center gap-6">
+<a class="font-headline uppercase tracking-widest text-xs text-secondary border-b-2 border-secondary h-16 flex items-center" href="#">Vitals</a>
+<a class="font-headline uppercase tracking-widest text-xs text-[#262626] hover:text-primary transition-colors h-16 flex items-center" href="#">Logs</a>
+<a class="font-headline uppercase tracking-widest text-xs text-[#262626] hover:text-primary transition-colors h-16 flex items-center" href="#">Matrix</a>
+</nav>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4 px-4 py-1.5 bg-surface-container-low border border-outline-variant/10">
+<div class="flex flex-col items-end">
+<span class="font-mono text-[10px] text-on-surface-variant leading-none">AGENTS_CONNECTED</span>
+<span class="font-mono text-xs font-bold text-primary">12/12</span>
+</div>
+<div class="w-[1px] h-6 bg-outline-variant/20"></div>
+<div class="flex flex-col">
+<span class="font-mono text-[10px] text-on-surface-variant leading-none">STATUS</span>
+<span class="font-mono text-xs font-bold text-secondary uppercase">Arena_Live</span>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined" data-icon="notifications">notifications</span></button>
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined" data-icon="terminal">terminal</span></button>
+<div class="w-8 h-8 bg-surface-container-high flex items-center justify-center">
+<span class="material-symbols-outlined text-on-surface-variant" data-icon="account_circle">account_circle</span>
+</div>
+</div>
+</div>
+</header>
+<!-- Page Content -->
+<div class="p-8 max-w-7xl mx-auto space-y-12 pb-24 relative z-10">
+<!-- Section Header -->
+<div class="flex items-end justify-between border-b border-outline-variant/20 pb-4">
+<div>
+<span class="font-mono text-secondary text-xs font-bold tracking-[0.2em]">TAB_01</span>
+<h3 class="text-4xl font-headline font-bold tracking-tight mt-1">NEW SESSION</h3>
+</div>
+<div class="flex items-center gap-4 text-on-surface-variant font-mono text-[10px]">
+<span>SESSION_ID: <span class="text-on-surface">ARENA-992-X</span></span>
+<span>LATENCY: <span class="text-primary">12MS</span></span>
+</div>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-12 gap-6">
+<!-- Left Column: Chaos Selection -->
+<div class="col-span-12 lg:col-span-8 space-y-6">
+<div class="flex items-center justify-between">
+<h4 class="font-headline text-lg font-medium flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary" data-icon="psychology">psychology</span>
+                                SELECT CHAOS AGENT
+                            </h4>
+<span class="font-mono text-[10px] text-on-surface-variant px-2 py-0.5 bg-surface-container-high">4 LOADED</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<!-- Card 1 -->
+<div class="bg-surface-container-low p-5 group hover:bg-surface-container-high transition-all border-l-2 border-transparent hover:border-secondary">
+<div class="flex justify-between items-start mb-6">
+<div class="w-16 h-16 bg-surface-container-lowest relative overflow-hidden">
+<img class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all" data-alt="Cybernetic mascot with a sinister red glowing eye" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBKal2L4Z30eEvYdeQxsPIUsPpAIOye2kTf2p1GvZRNwpJWCu_YCxsybgwHIfuOoKs3iraDFGMEkVen9vuJ6i5OWS_jbceFEFtEe62NRNZYRgH7nvtV9E4HMh-gYqlzRGU1OAXPW4iVmE7i0pKKM2K5SzVwY6WSGf-barFb5IBWzQolYSrDumQ029SFGghsBwvJgAOMpl3ZZzxvFc_AT040WePj-yU7JB_Xmq2TKXSIYwf0sBL9SpYHVKYjK9-taciYtCQXA_IqX_8p"/>
+<div class="absolute inset-0 bg-secondary/5 opacity-0 group-hover:opacity-100"></div>
+</div>
+<div class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-container-highest peer-focus:outline-none peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface-variant peer-checked:after:bg-secondary after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary/20"></div>
+</div>
+</div>
+<h5 class="font-headline font-bold text-on-surface group-hover:text-secondary transition-colors">BIT_FLIPPER</h5>
+<p class="text-xs text-on-surface-variant mt-2 leading-relaxed">Injects random bit-level corruption into logical operations and memory clusters.</p>
+</div>
+<!-- Card 2 -->
+<div class="bg-surface-container-low p-5 group hover:bg-surface-container-high transition-all border-l-2 border-transparent hover:border-secondary">
+<div class="flex justify-between items-start mb-6">
+<div class="w-16 h-16 bg-surface-container-lowest relative overflow-hidden">
+<img class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all" data-alt="Hacker mascot with a deep crimson eye light" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA7lMa9eCiMZce4lxVdiHr7fx6ei2XIX-lcDLVPepGKBK1pJkc-MDIgTqUH9Ce_Xhx2JbCeijOTEAsBJMvxkSrkOzsiqOvRqG7-5AvbZrRjktaqvZcYmbjCpDrVFsXLdPA4d6Hz25XVlE7KcgL5mMDqhzj8RVpapfq1Z6vwrIA2-pF5XKKBxffgEdvoWWE1wCF8_GrBAahPF6BnXw4tXPqzB6pnikCA-A3xWIviHtaXGOqRaTK9mc6TJGZGZzK0OzGXDBGJUNVEZmxz"/>
+<div class="absolute inset-0 bg-secondary/5 opacity-0 group-hover:opacity-100"></div>
+</div>
+<div class="relative inline-flex items-center cursor-pointer">
+<input class="sr-only peer" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-container-highest peer-focus:outline-none peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface-variant peer-checked:after:bg-secondary after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary/20"></div>
+</div>
+</div>
+<h5 class="font-headline font-bold text-on-surface group-hover:text-secondary transition-colors">OOM_GHOST</h5>
+<p class="text-xs text-on-surface-variant mt-2 leading-relaxed">Simulates Out-Of-Memory spikes by flooding cache lines with redundant garbage.</p>
+</div>
+<!-- Card 3 -->
+<div class="bg-surface-container-low p-5 group hover:bg-surface-container-high transition-all border-l-2 border-transparent hover:border-secondary">
+<div class="flex justify-between items-start mb-6">
+<div class="w-16 h-16 bg-surface-container-lowest relative overflow-hidden">
+<img class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all" data-alt="Security bot mascot with a glowing red optic sensor" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDQd56ICrgf0Lkct0hRXyDkrh1Tu_bE3mp5zx90DRIRQUnj07i3F7Xk-lrjO70Fpsywt5pbZdfX1vav_UyT77Y0EYudmyLfqJW5kHGdofX3YjaGJiXwM4Bl8Czg27CVV_0xsdRYNSOXaDqt3ayOXJSRHWT19RsS0mpSX6hBkNyuU2MojuH3kmkoL6yfYJ1x9VbpOK21jEIDnf2KWKs1FvXzzt5Hr2Zoc6LFWfw1t4kBlJqEMxaBLFPXaJpWjBkTjafXLIu0tNPVNiMt"/>
+<div class="absolute inset-0 bg-secondary/5 opacity-0 group-hover:opacity-100"></div>
+</div>
+<div class="relative inline-flex items-center cursor-pointer">
+<input class="sr-only peer" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-container-highest peer-focus:outline-none peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface-variant peer-checked:after:bg-secondary after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary/20"></div>
+</div>
+</div>
+<h5 class="font-headline font-bold text-on-surface group-hover:text-secondary transition-colors">LAG_SPIKE</h5>
+<p class="text-xs text-on-surface-variant mt-2 leading-relaxed">Artificial network throttling that introduces jitter and high packet loss rates.</p>
+</div>
+<!-- Card 4 -->
+<div class="bg-surface-container-low p-5 group hover:bg-surface-container-high transition-all border-l-2 border-transparent hover:border-secondary">
+<div class="flex justify-between items-start mb-6">
+<div class="w-16 h-16 bg-surface-container-lowest relative overflow-hidden">
+<img class="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all" data-alt="AI mascot with a menacing red glow from the central eye" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBe7T4rB3NjIzZAwi92-Vft9pZEMBYhUYS2xsLEirpIcGmHMzAnBCslGVjA3pYpKsAtG_Tu2yhXiV-YykbIJySd7Bq5NSyzSMJJ2ivFWibvZI6XRETM-Vr7VxfJSM_8DF1yv7k64X7FFhI8EbEyjwM5Rm-esj27ZRjNeWwdjgeeEpFvXXRDrpW_KSUGNZ2NNTJS_TdQVwT-GwiHajLp5u7vLAlN6AFC3m56HY3XJj9XvzYCFK8UP5DrPPD1uS5fGOQOMQ9qsznMl9WW"/>
+<div class="absolute inset-0 bg-secondary/5 opacity-0 group-hover:opacity-100"></div>
+</div>
+<div class="relative inline-flex items-center cursor-pointer">
+<input class="sr-only peer" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-container-highest peer-focus:outline-none peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface-variant peer-checked:after:bg-secondary after:h-5 after:w-5 after:transition-all peer-checked:bg-secondary/20"></div>
+</div>
+</div>
+<h5 class="font-headline font-bold text-on-surface group-hover:text-secondary transition-colors">PROMPT_POISON</h5>
+<p class="text-xs text-on-surface-variant mt-2 leading-relaxed">Injects hidden context tokens to bypass alignment and force forbidden outputs.</p>
+</div>
+</div>
+</div>
+<!-- Right Column: Parameters -->
+<div class="col-span-12 lg:col-span-4 space-y-6">
+<!-- Target Selection -->
+<div class="bg-surface-container-low p-6 space-y-4">
+<label class="font-headline text-sm font-bold uppercase tracking-widest text-secondary block">Target Agent</label>
+<div class="relative">
+<select class="w-full bg-surface-container-highest border-0 text-on-surface font-mono text-xs p-4 appearance-none focus:ring-1 focus:ring-secondary">
+<option>CLUSTER_ALPHA_AGENT_01</option>
+<option>SENTINEL_CORE_V4</option>
+<option>OMNI_PROCESSOR_721</option>
+</select>
+<div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
+<span class="material-symbols-outlined text-on-surface-variant" data-icon="expand_more">expand_more</span>
+</div>
+</div>
+</div>
+<!-- Intensity -->
+<div class="bg-surface-container-low p-6 space-y-6">
+<div class="flex justify-between items-center">
+<label class="font-headline text-sm font-bold uppercase tracking-widest text-secondary block">Intensity Slider</label>
+<span class="font-mono text-xl text-secondary font-bold">07</span>
+</div>
+<input class="w-full h-1 bg-surface-container-highest appearance-none cursor-pointer accent-secondary" max="10" min="1" type="range" value="7"/>
+<div class="flex justify-between font-mono text-[10px] text-on-surface-variant">
+<span>MIN_STABLE</span>
+<span>MAX_CHAOS</span>
+</div>
+</div>
+<!-- Info Display -->
+<div class="bg-secondary/5 border border-secondary/10 p-6">
+<div class="flex items-center gap-3 text-secondary mb-2">
+<span class="material-symbols-outlined text-sm" data-icon="warning">warning</span>
+<span class="font-headline font-bold text-xs uppercase tracking-widest">Warning</span>
+</div>
+<p class="text-[11px] font-mono text-on-surface-variant leading-relaxed">
+                                High intensity levels (&gt;08) may cause permanent node desynchronization within the sandbox environment. Proceed with extreme caution.
+                            </p>
+</div>
+</div>
+<!-- Bottom Wide Row: Text Injection -->
+<div class="col-span-12">
+<div class="bg-surface-container-low p-8 space-y-4">
+<label class="font-headline text-sm font-bold uppercase tracking-widest text-secondary block">Target Prompt Injection</label>
+<div class="relative">
+<textarea class="w-full bg-surface-container-lowest border-0 text-primary font-mono text-xs p-6 placeholder:text-on-surface-variant/30 focus:ring-1 focus:ring-secondary resize-none" placeholder="Enter test injection sequences or raw system instructions here..." rows="6"></textarea>
+<div class="absolute bottom-4 right-4 flex gap-2">
+<button class="bg-surface-container-high px-3 py-1 text-[10px] font-mono hover:text-primary transition-colors">CLEAR</button>
+<button class="bg-surface-container-high px-3 py-1 text-[10px] font-mono hover:text-primary transition-colors">TEMPLATES</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Launch Action -->
+<div class="col-span-12 pt-6">
+<button class="w-full py-10 bg-secondary text-on-secondary relative group overflow-hidden">
+<div class="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="relative flex flex-col items-center gap-2">
+<span class="font-headline text-3xl font-black tracking-[0.2em]">LAUNCH CHAOS</span>
+<span class="font-mono text-xs font-bold opacity-70">EXERTING CONTROL OVER [CLUSTER_ALPHA_AGENT_01]</span>
+</div>
+<!-- Decorative corner elements -->
+<div class="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-on-secondary/30"></div>
+<div class="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-on-secondary/30"></div>
+</button>
+</div>
+</div>
+</div>
+<!-- Matrix Stats Overlay (Small) -->
+<div class="fixed bottom-6 right-8 z-50 flex gap-4">
+<div class="px-4 py-2 bg-surface-container border border-outline-variant/20 flex items-center gap-3">
+<div class="flex -space-x-2">
+<div class="w-6 h-6 bg-secondary flex items-center justify-center text-[10px] text-on-secondary font-bold">A</div>
+<div class="w-6 h-6 bg-primary flex items-center justify-center text-[10px] text-on-primary font-bold">S</div>
+</div>
+<span class="font-mono text-[10px] uppercase text-on-surface-variant">System_Vitals: Nominal</span>
+</div>
+</div>
+</main>
+</div>
+</body></html>
