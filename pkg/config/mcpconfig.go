@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -131,13 +132,22 @@ func RewriteForProxy(proxyListenAddr, serverName string) MCPServerEntry {
 }
 
 // IsAlreadyWrapped returns true if the server entry is already routing through gremlyn.
+//
+// The command comes from an MCP client config file, which may have been written on
+// a different OS than the one reading it, so both '/' and '\' are treated as
+// separators regardless of the host. filepath.Base would not do that: on Unix it
+// leaves "C:\bin\gremlyn.exe" intact, and the entry would be wrapped twice.
+//
+// Matching is deliberately lenient (case-insensitive, ".exe" stripped) because the
+// two failure modes are not symmetric: a false positive only means we decline to
+// rewrite an entry, while a false negative double-wraps it and breaks the user's
+// MCP client.
 func IsAlreadyWrapped(entry MCPServerEntry) bool {
-	if entry.Command == "gremlyn" {
-		return true
+	cmd := entry.Command
+	if i := strings.LastIndexAny(cmd, `/\`); i >= 0 {
+		cmd = cmd[i+1:]
 	}
-	// Also check if the command ends with /gremlyn or \gremlyn.
-	base := filepath.Base(entry.Command)
-	return base == "gremlyn" || base == "gremlyn.exe"
+	return strings.TrimSuffix(strings.ToLower(cmd), ".exe") == "gremlyn"
 }
 
 // BackupConfig creates a timestamped backup of the config file.

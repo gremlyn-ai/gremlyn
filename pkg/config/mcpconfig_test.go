@@ -82,11 +82,32 @@ func TestRewriteForProxy(t *testing.T) {
 }
 
 func TestIsAlreadyWrapped(t *testing.T) {
-	assert.True(t, IsAlreadyWrapped(MCPServerEntry{Command: "gremlyn"}))
-	assert.True(t, IsAlreadyWrapped(MCPServerEntry{Command: "/usr/local/bin/gremlyn"}))
-	assert.True(t, IsAlreadyWrapped(MCPServerEntry{Command: "C:\\bin\\gremlyn.exe"}))
-	assert.False(t, IsAlreadyWrapped(MCPServerEntry{Command: "npx"}))
-	assert.False(t, IsAlreadyWrapped(MCPServerEntry{Command: "python"}))
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		// Already wrapped — must not be rewritten a second time.
+		{"bare", "gremlyn", true},
+		{"unix absolute", "/usr/local/bin/gremlyn", true},
+		{"windows absolute", `C:\bin\gremlyn.exe`, true},
+		{"windows relative", `bin\gremlyn.exe`, true},
+		{"exe on unix path", "/opt/gremlyn.exe", true},
+		{"mixed case", "/usr/bin/Gremlyn", true},
+
+		// Not wrapped — must be rewritten.
+		{"npx", "npx", false},
+		{"python", "python", false},
+		{"empty", "", false},
+		{"prefix only", "gremlynx", false},
+		{"suffix only", "my-gremlyn-helper", false},
+		{"gremlyn in a directory, not the binary", "/opt/gremlyn/bin/server", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsAlreadyWrapped(MCPServerEntry{Command: tt.command}))
+		})
+	}
 }
 
 func TestBackupAndWriteConfig(t *testing.T) {

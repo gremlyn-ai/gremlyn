@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,16 +20,25 @@ import (
 )
 
 // memEventStore is an in-memory EventStore for API tests.
+//
+// It must be safe for concurrent use: a running session records events from its
+// own goroutine while HTTP handlers read them, which the real SQLite and
+// PostgreSQL stores serialize for us.
 type memEventStore struct {
+	mu     sync.Mutex
 	events []models.ArenaEvent
 }
 
 func (m *memEventStore) InsertEvent(_ context.Context, e models.ArenaEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.events = append(m.events, e)
 	return nil
 }
 
 func (m *memEventStore) ListBySession(_ context.Context, sessionID string) ([]models.ArenaEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var result []models.ArenaEvent
 	for _, e := range m.events {
 		if e.SessionID == sessionID {
