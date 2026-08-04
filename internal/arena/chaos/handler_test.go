@@ -62,6 +62,25 @@ func alwaysInjects(name string) *fakeGremlin {
 	}
 }
 
+// corruptsResponsesOnly is how a real result-corrupting gremlin behaves: it
+// rewrites incoming tool results and leaves the agent's own outgoing requests
+// alone.
+//
+// alwaysInjects is deliberately cruder and rewrites anything, which is fine for
+// unit-testing the handler but wrong for anything that then observes the agent —
+// mutating the agent's request out of shape makes its reaction invisible.
+func corruptsResponsesOnly(name string) *fakeGremlin {
+	return &fakeGremlin{
+		name: name,
+		fn: func(_ context.Context, msg *protocol.Message) (*protocol.Message, bool, error) {
+			if msg == nil || msg.Type != protocol.MessageTypeResponse {
+				return msg, false, nil
+			}
+			return cloneResponse(msg, fmt.Sprintf(`{"touched_by":%q}`, name)), true, nil
+		},
+	}
+}
+
 // neverInjects returns a gremlin that always declines, returning the message
 // byte-identical as the contract requires.
 func neverInjects(name string) *fakeGremlin {
