@@ -211,6 +211,19 @@ P2.2    GitHub Action                   ✅
 4. **Rendre les paramètres des gremlins configurables** par scénario (aujourd'hui `BuildGremlins` code en dur les délais, tailles, payloads).
 5. **Shield** : repositionner en observabilité MCP, puis L2/L4. Toujours hors du chemin critique.
 
+## À faire avant le premier push
+
+**Purger les binaires de l'historique.** `bin/` a été commité par erreur sur plusieurs commits : 76 Mo de blobs, `.git` à 36 Mo. C'est corrigé pour la suite (untracké + gitignoré), mais les blobs restent dans l'historique. Rien n'a été poussé, donc c'est encore gratuit à nettoyer :
+
+```bash
+# nécessite git-filter-repo (pip install git-filter-repo)
+git filter-repo --invert-paths --path bin/
+```
+
+Après un push, ces 76 Mo pèsent sur chaque `git clone`, définitivement.
+
+**Aussi :** créer `gremlyn-ai/homebrew-tap` et le secret `HOMEBREW_TAP_GITHUB_TOKEN`, sinon l'étape Homebrew de la release échoue.
+
 ## Dette connue
 
 - **`internal/shield/{detection/{classifier,llmjudge,structural},behavioral/*}.go`** sont documentés comme s'ils existaient. Ils sont marqués *(planned)* dans `.claude/` mais pas écrits.
@@ -218,6 +231,7 @@ P2.2    GitHub Action                   ✅
 - **`.claude/settings.local.json`** contient des chemins Windows périmés. Gitignoré, sans effet, mais bruyant.
 - **Les paramètres des gremlins ne sont pas configurables** par scénario.
 - **La fenêtre d'observation par défaut est de 30 s.** Trop courte, un agent lent passe pour fragile ; trop longue, une action ultérieure sans rapport compte comme une réaction. Non calibrée sur du trafic réel.
+- **5 warnings de lint dans le dashboard**, laissés en place volontairement. Trois variables mortes (`toggle` dans `TerminalPanel.tsx`, `totalBlocked` dans `ThreatChart.tsx`, la prop `statusText` de `TopBar.tsx`) ressemblent à des features à moitié câblées — à regarder, pas à supprimer à l'aveugle. Les deux autres sont `no-page-custom-font` dans `app/layout.tsx` : les polices passent par `<link>` au lieu de `next/font`, ce qui est une décision de chargement, pas un détail de lint.
 
 ---
 
