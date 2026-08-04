@@ -208,6 +208,10 @@ func countOutcomes(events []models.ArenaEvent) (sent, survived, crashed int) {
 			survived++
 		case models.OutcomeCrashed:
 			crashed++
+		case models.OutcomeDegraded:
+			// Deliberately not counted: a degraded outcome is neither a clean
+			// survival nor a crash, and the two returned counters are the only
+			// buckets. It stays folded into `sent` only.
 		}
 	}
 	return sent, survived, crashed

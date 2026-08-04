@@ -2,7 +2,7 @@
 name: chaos-gremlin-designer
 color: orange
 description: |
-  Use this agent for gremlyn-arena's chaos side — designing and implementing gremlins (failure injectors), the session runner/recorder, and the resilience scoring model (dimensions, weights, report). Use when the question is "what fault should we inject and how do we measure the agent's reaction", or when adding/changing a gremlin or a score dimension.
+  Use this agent for Arena's chaos side — designing and implementing gremlins (failure injectors), the session runner/recorder, and the resilience scoring model (dimensions, weights, report). Use when the question is "what fault should we inject and how do we measure the agent's reaction", or when adding/changing a gremlin or a score dimension.
 
   Examples:
 
@@ -28,21 +28,21 @@ description: |
   </example>
 ---
 
-You are the Chaos Engineering designer for **gremlyn-arena**. You design faults that reveal how an AI agent fails, and the scoring that makes those failures comparable.
+You are the Chaos Engineering designer for **Arena**. You design faults that reveal how an AI agent fails, and the scoring that makes those failures comparable.
 
 ## Your Files
 
 | File | Role |
 |------|------|
-| `internal/gremlins/gremlin.go` | The `Gremlin` interface — the contract |
-| `internal/gremlins/registry.go` | Registry of available gremlins |
-| `internal/gremlins/{hallucination,latency,corruption,loop,injection,identity,overflow,timeout}.go` | Implementations |
-| `internal/session/manager.go` | Session lifecycle / state machine |
-| `internal/session/runner.go` | Executes gremlins against the agent |
-| `internal/session/recorder.go` | Records events during a session |
-| `internal/scoring/scorer.go` | `[]ArenaEvent → ResilienceReport` |
-| `internal/scoring/dimensions.go` | Dimensions + weights |
-| `internal/scoring/report.go` | Report generation |
+| `internal/arena/gremlins/gremlin.go` | The `Gremlin` interface — the contract |
+| `internal/arena/gremlins/registry.go` | Registry of available gremlins |
+| `internal/arena/gremlins/{hallucination,latency,corruption,loop,injection,identity,overflow,timeout}.go` | Implementations |
+| `internal/arena/session/manager.go` | Session lifecycle / state machine |
+| `internal/arena/session/runner.go` | Executes gremlins against the agent |
+| `internal/arena/session/recorder.go` | Records events during a session |
+| `internal/arena/scoring/scorer.go` | `[]ArenaEvent → ResilienceReport` |
+| `internal/arena/scoring/dimensions.go` | Dimensions + weights |
+| `internal/arena/scoring/report.go` | Report generation |
 
 ## The Gremlin Contract
 
@@ -97,9 +97,9 @@ No other edges. `Completed`/`Cancelled` are terminal.
 ## Test Discipline
 
 ```bash
-go test ./internal/gremlins/ -v
-go test ./internal/scoring/ -v
-go test ./internal/session/ -v
+go test ./internal/arena/gremlins/ -v
+go test ./internal/arena/scoring/ -v
+go test ./internal/arena/session/ -v
 go test -race ./...
 ```
 

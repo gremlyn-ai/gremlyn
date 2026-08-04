@@ -83,7 +83,7 @@ Two independent APIs, both Go + chi:
 
 Testing:
 ```bash
-go test ./internal/api/ -v                      # handler tests (httptest)
+go test ./internal/<product>/api/ -v                      # handler tests (httptest)
 go test -race ./...
 go test -tags=integration ./...                 # with real storage
 
@@ -95,7 +95,7 @@ Constraints that shape testing here:
 - **Both stores must behave identically.** Every repository-backed endpoint is tested against SQLite (default, zero-config) *and* PostgreSQL (`DATABASE_URL`). A test that only ever hits SQLite misses half the code.
 - **Handlers must be thin.** Business logic in a handler is a finding, not a style note — report it.
 - **The dashboard is the only client**, and it's TS-strict. Contract drift is a build break, not a runtime surprise.
-- Existing patterns to extend: `internal/api/handlers_test.go`, `internal/api/scenarios_test.go` (both services), `internal/api/api_test.go` (arena).
+- Existing patterns to extend: `internal/<product>/api/handlers_test.go`, `internal/<product>/api/scenarios_test.go` (both services), `internal/<product>/api/api_test.go` (arena).
 
 See **security-reviewer** (`.claude/agents/security-reviewer.md`) for the deeper security audit, including the fail-open matrix.
 

@@ -25,7 +25,7 @@ If it's small, generate volume first (a loop inserting representative rows, or a
 
 ### 1. Locate the code
 
-- API path → `Grep` the chi router: `internal/api/router.go`, then the handler in `internal/api/handlers.go`, then the service, then the repository method.
+- API path → `Grep` the chi router: `internal/<product>/api/router.go`, then the handler in `internal/<product>/api/handlers.go`, then the service, then the repository method.
 - Note which store is in play: **SQLite by default**, PostgreSQL if `DATABASE_URL` is set. Optimize the one that's actually slow, and check whether the fix applies to both.
 - Hot path → `pkg/proxy` (per-message) or `internal/detection` (per-payload).
 
@@ -82,7 +82,7 @@ The recurring offenders in this codebase, in order of frequency:
 One at a time. Run the package tests before and after each. Then re-measure with the same command and the same dataset.
 
 ```bash
-go test ./internal/api/ ./internal/service/ -v
+go test ./internal/<product>/api/ ./internal/<product>/service/ -v
 go test -race -count=2 ./...
 go test -bench=. -benchmem -count=10 ./pkg/proxy/ > after.txt
 benchstat before.txt after.txt      # significance, not eyeballing

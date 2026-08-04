@@ -58,7 +58,7 @@ Metrics that need this discipline:
 - **SQL:** SQLite and PostgreSQL — the same query often needs both dialects
 - **Analysis:** distributions, percentiles, rates with confidence intervals, cohort/segment analysis
 - **Visualisation:** Chart.js (the dashboard's chart library), chart-type selection, accessible palettes
-- **Go:** reading the aggregation code that feeds the API, and `internal/scoring/` for how scores are actually computed
+- **Go:** reading the aggregation code that feeds the API, and `internal/arena/scoring/` for how scores are actually computed
 
 ## 💬 Communication Style
 

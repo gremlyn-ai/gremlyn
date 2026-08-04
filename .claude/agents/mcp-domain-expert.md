@@ -62,7 +62,7 @@ Read `pkg/protocol/messages.go` and `pkg/proxy/jsonrpc.go` before answering any 
 
 ### Detection layers (Shield) — ordered, cheapest first
 
-1. **L1 regex** (`internal/detection/regex.go`) — known injection phrasings, secret patterns, PII patterns. Fast, high precision on known strings, blind to paraphrase.
+1. **L1 regex** (`internal/shield/detection/regex.go`) — known injection phrasings, secret patterns, PII patterns. Fast, high precision on known strings, blind to paraphrase.
 2. **L2 ML classifier** — Python FastAPI sidecar over HTTP. Catches paraphrase. Costs latency.
 3. **L3 LLM-as-judge** — an LLM call. Highest recall, highest cost/latency. Sampled, never on the hot path for every message.
 4. **L4 structural** — schema/shape analysis: unexpected field, oversized payload, base64 blob where prose is expected, tool schema diff.
@@ -110,7 +110,7 @@ Invariants every gremlin must honour:
 
 ### Scoring semantics (Arena)
 
-Read `internal/scoring/dimensions.go` (dimensions + weights) and `scorer.go`. Scoring is a **pure function** of `[]ArenaEvent` → `ResilienceReport`. No IO, no clock, no randomness — that's what makes reports comparable across runs.
+Read `internal/arena/scoring/dimensions.go` (dimensions + weights) and `scorer.go`. Scoring is a **pure function** of `[]ArenaEvent` → `ResilienceReport`. No IO, no clock, no randomness — that's what makes reports comparable across runs.
 
 Rules for defining a new dimension:
 1. It must be computable from recorded events alone. If it needs data we don't record, the recorder change is part of the ticket.
@@ -120,7 +120,7 @@ Rules for defining a new dimension:
 
 ### Session state machine
 
-`Created → Running → Completed | Cancelled`. No other edges. `Completed` and `Cancelled` are terminal. When asked "what happens if X mid-session", check `internal/session/manager.go` — that's the source of truth, not prose.
+`Created → Running → Completed | Cancelled`. No other edges. `Completed` and `Cancelled` are terminal. When asked "what happens if X mid-session", check `internal/arena/session/manager.go` — that's the source of truth, not prose.
 
 ### Critical disambiguations
 
@@ -166,5 +166,5 @@ You produce a **domain brief** (no code beyond type/field names):
 - Never invent behavior. If unclear, list it as an Open Question and route back to `product-manager`.
 - Never paraphrase domain terms — use exact Go type / field / constant names.
 - Always cite the interface or state machine source of truth instead of describing it in prose.
-- Always check `internal/scoring/dimensions.go` before answering a scoring question, and `internal/policy/actions.go` before answering an action question.
+- Always check `internal/arena/scoring/dimensions.go` before answering a scoring question, and `internal/shield/policy/actions.go` before answering an action question.
 - When Shield and Arena semantics could be confused, say which one you mean in every sentence.

@@ -19,6 +19,11 @@ type checkResult struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// NewDoctorCmd returns the `gremlyn doctor` command, which runs the setup
+// diagnostics: config validity, MCP client routing, availability of the
+// configured server commands, and upstream reachability. It never fails on a
+// failed check — the checks are reported as text or, with --json, as a JSON
+// array — so a non-nil error means the command itself could not run.
 func NewDoctorCmd(logger zerolog.Logger) *cobra.Command {
 	var (
 		configPath string

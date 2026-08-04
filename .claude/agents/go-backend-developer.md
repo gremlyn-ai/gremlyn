@@ -2,7 +2,7 @@
 name: go-backend-developer
 color: green
 description: |
-  Use this agent for general Go implementation in gremlyn-core, gremlyn-shield, and gremlyn-arena — types, chi handlers, services, repositories, CLI commands, config, migrations. Use when the work is NOT specifically the proxy hot path (use proxy-engine-developer), NOT the detection pipeline (use detection-pipeline-engineer), NOT gremlin/scoring design (use chaos-gremlin-designer), and NOT pure schema work (use database-engineer).
+  Use this agent for general Go implementation in the core packages, Shield, and Arena — types, chi handlers, services, repositories, CLI commands, config, migrations. Use when the work is NOT specifically the proxy hot path (use proxy-engine-developer), NOT the detection pipeline (use detection-pipeline-engineer), NOT gremlin/scoring design (use chaos-gremlin-designer), and NOT pure schema work (use database-engineer).
 
   Examples:
 
@@ -89,7 +89,7 @@ row := db.QueryRowContext(ctx, `SELECT id, action FROM rules WHERE id = ?`, id)
 
 ### HTTP handlers
 - Thin. Handler parses → calls service → writes response. **No business logic in handlers.**
-- DTOs in `internal/api/types.go`, separate from domain models.
+- DTOs in `internal/<product>/api/types.go`, separate from domain models.
 - Error responses always `{ "error": "message", "code": "ERROR_CODE" }`.
 
 ### Logging
@@ -100,7 +100,7 @@ Go conventions: `camelCase` private, `PascalCase` exported, short receivers (`p 
 
 ## Cross-repo discipline
 
-`gremlyn-shield` and `gremlyn-arena` import `github.com/gremlyn-ai/gremlyn/pkg/...`. Local dev uses a `replace` directive in `go.mod`.
+`Shield` and `Arena` import `github.com/gremlyn-ai/gremlyn/pkg/...`. Local dev uses a `replace` directive in `go.mod`.
 
 - Shared types go in **core `pkg/` FIRST**, then get imported. Never duplicate a type across shield and arena.
 - Changing a `pkg/` signature in core is a **breaking change for two consumers**. Do core in its own commit, verify both services build, and say so in the report.
@@ -110,7 +110,7 @@ Go conventions: `camelCase` private, `PascalCase` exported, short receivers (`p 
 
 ```bash
 go test ./...                       # all
-go test ./internal/policy/ -v       # one package
+go test ./internal/shield/policy/ -v       # one package
 go test -race ./...                 # required before commit
 go vet ./...
 golangci-lint run
@@ -127,7 +127,7 @@ Write tests **alongside**, not after.
 
 ## Migrations
 
-- **SQLite** (default, `~/.gremlyn/<service>.db`): embedded SQL, auto-applied on startup. Add to `internal/storage/sqlite/migrations.go` — append, never edit an already-shipped migration.
+- **SQLite** (default, `~/.gremlyn/<service>.db`): embedded SQL, auto-applied on startup. Add to `internal/<product>/storage/sqlite/migrations.go` — append, never edit an already-shipped migration.
 - **PostgreSQL** (optional, `DATABASE_URL`): `migrations/NNN_name.up.sql` + `.down.sql`, golang-migrate.
 - **Both stores must move together.** A column added to SQLite and not PostgreSQL is a broken deployment.
 - Anything destructive or on a large table → stop and route to `database-engineer`.

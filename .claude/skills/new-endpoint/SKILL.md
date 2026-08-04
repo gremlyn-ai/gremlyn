@@ -1,6 +1,6 @@
 ---
 name: new-endpoint
-description: Create a new REST endpoint in gremlyn-shield or gremlyn-arena — chi handler, DTOs, service method, both repositories, tests, and the matching dashboard TypeScript type. Use when the user says "new endpoint", "add an API route", "expose X in the API", or runs /new-endpoint.
+description: Create a new REST endpoint in Shield or Arena — chi handler, DTOs, service method, both repositories, tests, and the matching dashboard TypeScript type. Use when the user says "new endpoint", "add an API route", "expose X in the API", or runs /new-endpoint.
 ---
 
 # New API Endpoint
@@ -16,12 +16,12 @@ Create a new chi endpoint following Gremlyn conventions. The work spans **five l
 ## Layers — all of them
 
 ```
-internal/api/router.go        → register the route
-internal/api/types.go         → request + response DTOs
-internal/api/handlers.go      → thin handler: parse → service → respond
-internal/service/<svc>.go     → the business logic + the store interface it needs
-internal/storage/sqlite/      → repository implementation (DEFAULT store)
-internal/storage/postgres/    → repository implementation (same interface)
+internal/<product>/api/router.go        → register the route
+internal/<product>/api/types.go         → request + response DTOs
+internal/<product>/api/handlers.go      → thin handler: parse → service → respond
+internal/<product>/service/<svc>.go     → the business logic + the store interface it needs
+internal/<product>/storage/sqlite/      → repository implementation (DEFAULT store)
+internal/<product>/storage/postgres/    → repository implementation (same interface)
 migrations (both stores)      → only if the schema moved
 ─────────────────────────────────────────────────────────────────
 dashboard/lib/api/types.ts    → mirror the Go DTO exactly
@@ -30,14 +30,14 @@ dashboard/lib/api/<svc>.ts    → the client method
 
 ## Checklist
 
-### 1. DTOs — `internal/api/types.go`
+### 1. DTOs — `internal/<product>/api/types.go`
 - [ ] Request and response structs, **separate from the domain models**
 - [ ] `json` tag on every field
 - [ ] Godoc on every exported type
 - [ ] No `map[string]interface{}` for a known shape
 - [ ] Optional fields are pointers or `omitempty` — and you'll mirror that optionality in TypeScript
 
-### 2. Service — `internal/service/<svc>.go`
+### 2. Service — `internal/<product>/service/<svc>.go`
 - [ ] Method takes `ctx context.Context` **first**
 - [ ] **Defines the store interface it needs, here in the consumer** — 1–3 methods
 - [ ] All business logic lives here, not in the handler
@@ -45,26 +45,26 @@ dashboard/lib/api/<svc>.ts    → the client method
 - [ ] Domain errors as sentinels so the handler can map them to status codes
 
 ### 3. Repositories — **both stores**
-- [ ] `internal/storage/sqlite/<resource>_repo.go` — `?` placeholders
-- [ ] `internal/storage/postgres/<resource>_repo.go` — `$1` placeholders
+- [ ] `internal/<product>/storage/sqlite/<resource>_repo.go` — `?` placeholders
+- [ ] `internal/<product>/storage/postgres/<resource>_repo.go` — `$1` placeholders
 - [ ] **Parameterized always.** Never `fmt.Sprintf` into SQL
 - [ ] `defer rows.Close()` and **`rows.Err()` checked** after the loop
 - [ ] Dialect differences (booleans, timestamps, JSON) normalized *inside* the repo — never leaked to the service
 - [ ] For a list endpoint on a growing table: **keyset pagination, never `OFFSET`**, and always a bound
 
-### 4. Handler — `internal/api/handlers.go`
+### 4. Handler — `internal/<product>/api/handlers.go`
 - [ ] **Thin**: decode → validate → call service → encode
 - [ ] Validate the request DTO before it reaches the service
 - [ ] Error response shape: `{ "error": "message", "code": "ERROR_CODE" }`
 - [ ] Map domain errors to status codes (`errors.Is`)
 - [ ] Never log a payload — log identifiers
 
-### 5. Route — `internal/api/router.go`
+### 5. Route — `internal/<product>/api/router.go`
 - [ ] RESTful path under `/api/v1/`
 - [ ] **API key auth middleware applied** — no exceptions without a written reason
 - [ ] Registered inside the existing route group so middleware actually wraps it
 
-### 6. Tests — `internal/api/handlers_test.go`
+### 6. Tests — `internal/<product>/api/handlers_test.go`
 Through the **real chi router** with `httptest`, not the handler in isolation:
 - [ ] Success: status + response shape
 - [ ] Validation error: shape and code
@@ -181,7 +181,7 @@ export interface Server {
 ```bash
 # in the service repo
 make check                                    # vet + lint + go test -race
-# in gremlyn-dashboard
+# in the dashboard
 npm run typecheck && npm run lint
 ```
 

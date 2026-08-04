@@ -15,7 +15,7 @@ import (
 
 func newTestDB(t *testing.T) *DB {
 	t.Helper()
-	db, err := New(":memory:", zerolog.Nop())
+	db, err := New(context.Background(), ":memory:", zerolog.Nop())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	return db
@@ -163,7 +163,7 @@ func TestEventsRepo_EmptySession(t *testing.T) {
 
 func TestMigrationIdempotent(t *testing.T) {
 	db := newTestDB(t)
-	require.NoError(t, db.migrate())
+	require.NoError(t, db.migrate(context.Background()))
 }
 
 // ── Time helpers ──

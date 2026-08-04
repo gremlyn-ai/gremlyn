@@ -73,8 +73,8 @@ Use `benchstat` over eyeballing two numbers. A 3% "win" inside noise is not a wi
 
 ### Hot paths, in order of how much they matter
 1. **`pkg/proxy` per-message path** — every MCP message the user's agent sends crosses it. Allocation here multiplies by traffic. Biggest wins: peek `method`/`id` without a full unmarshal; `json.RawMessage` for payloads no stage touches; a pooled read buffer per connection.
-2. **`internal/detection/regex.go`** — runs on every inspected payload. Precompile every pattern **once at construction**, never inside the match function. Combine alternations rather than looping N compiled patterns. Avoid unbounded quantifiers (also a ReDoS fix — coordinate with `security-reviewer`).
-3. **`internal/session/recorder.go`** — one write per event during a chaos run. Batch inserts rather than per-event `INSERT`; bound the batch and flush on terminal state (dropping events to go faster is a behavior change, and the events are the product).
+2. **`internal/shield/detection/regex.go`** — runs on every inspected payload. Precompile every pattern **once at construction**, never inside the match function. Combine alternations rather than looping N compiled patterns. Avoid unbounded quantifiers (also a ReDoS fix — coordinate with `security-reviewer`).
+3. **`internal/arena/session/recorder.go`** — one write per event during a chaos run. Batch inserts rather than per-event `INSERT`; bound the batch and flush on terminal state (dropping events to go faster is a behavior change, and the events are the product).
 4. **Repository list methods** — N+1 is the standard bug: loop over events, fetch the rule per event. Fix by batching (`WHERE id IN (…)` then map in Go) and **pin it with a query-count assertion** so it can't regress.
 5. **WebSocket broadcast** — a marshal per subscriber becomes a marshal per subscriber per event. Marshal once, write N times.
 
@@ -88,7 +88,7 @@ Use `benchstat` over eyeballing two numbers. A 3% "win" inside noise is not a wi
 ## Test Discipline
 
 ```bash
-go test ./internal/policy/ -v          # before AND after every change
+go test ./internal/shield/policy/ -v          # before AND after every change
 go test -race -count=2 ./...
 go test -bench=. -benchmem ./...
 ```

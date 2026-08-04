@@ -72,8 +72,8 @@ You are an AI engineer specializing in production AI systems. You understand the
 ## Gremlyn Context
 
 Where AI shows up in this codebase:
-- **`internal/shield/detection/llmjudge.go`** — the L3 client. Your primary file.
-- **`internal/shield/detection/classifier.go`** — the L2 ML sidecar client.
+- **`internal/shield/detection/llmjudge.go` *(planned)*** — the L3 client. Your primary file.
+- **`internal/shield/detection/classifier.go` *(planned)*** — the L2 ML sidecar client.
 - **`detection-models/`** — the Python FastAPI sidecar (per Shield's CLAUDE.md), run via `docker compose up -d ml-sidecar`.
 - **`pkg/protocol/`** — the MCP types everything else is built on.
 - **Arena's `InjectionGremlin` and `HallucinationGremlin`** generate the adversarial content — useful as adversarial test input for the judge, and a reminder that hostile text flows through this system by design.

@@ -1,17 +1,17 @@
 ---
 name: stack-health
-description: Full health check of the local Gremlyn stack — the four repos' build state, shield/arena/dashboard services, SQLite databases, optional Postgres/Redis/ML sidecar, cross-repo version alignment, and the end-to-end proxy against a real MCP server. Use when the user says "stack health", "check the stack", "is everything running", "health check", "doctor", or runs /stack-health.
+description: Full health check of the local Gremlyn stack — the single module's build state, shield/arena/dashboard services, SQLite databases, optional Postgres/Redis/ML sidecar, and the end-to-end proxy against a real MCP server. Use when the user says "stack health", "check the stack", "is everything running", "health check", "doctor", or runs /stack-health.
 ---
 
 # Stack Health Check
 
-You are a senior engineer auditing the local Gremlyn development stack. Gremlyn is **local-first** — there is no production to monitor, so this check covers the developer's machine and the four repos.
+You are a senior engineer auditing the local Gremlyn development stack. Gremlyn is **local-first** — there is no production to monitor, so this check covers the developer's machine and the one repo.
 
 ## Usage
 
 ```
 /stack-health              # full audit
-/stack-health repos        # build + version alignment only
+/stack-health build        # repo status + build gate only
 /stack-health services     # running services only
 /stack-health db           # databases only
 /stack-health e2e          # proxy against a real MCP server only
@@ -24,72 +24,69 @@ Run the independent checks **in parallel** where possible.
 ## Step 0 — Repo layout
 
 ```bash
-cd /home/sahra/Documents/sahra-perso/gremlyn && ls -d gremlyn-*
+cd /home/sahra/Documents/sahra-perso/gremlyn
+git rev-parse --show-toplevel
+head -1 go.mod
+ls -d cmd/* pkg/* internal/* migrations/* dashboard docs
 ```
 
-Expected: `gremlyn-core`, `gremlyn-shield`, `gremlyn-arena`, `gremlyn-dashboard`. Four **independent** git repositories; the parent is not a repo.
+Expected: **one** git repo rooted here, **one** Go module `github.com/gremlyn-ai/gremlyn`, holding `cmd/{gremlyn,shield,arena}`, `pkg/*`, `internal/{cli,shield,arena}`, `migrations/{shield,arena}`, `dashboard/`, `docs/`. The four old repos were merged on 2026-08-04; they survive only as a backup at `../gremlyn-old-repos-backup/` and are **not** part of the stack.
 
 ---
 
-## Step 1 — Cross-repo version alignment (the #1 source of confusing failures)
+## Step 1 — Repo status
 
 ```bash
 cd /home/sahra/Documents/sahra-perso/gremlyn
-for d in gremlyn-core gremlyn-shield gremlyn-arena gremlyn-dashboard; do
-  echo "=== $d  branch=$(git -C $d rev-parse --abbrev-ref HEAD)  $(git -C $d log -1 --format=%h)"
-  git -C "$d" status --short | head -5
-done
-
-echo "--- core version pinned by consumers"
-grep -H 'gremlyn-core' gremlyn-shield/go.mod gremlyn-arena/go.mod
-echo "--- replace directives (expected in local dev, MUST NOT ship in a tag)"
-grep -H '^replace' gremlyn-shield/go.mod gremlyn-arena/go.mod
+echo "branch=$(git rev-parse --abbrev-ref HEAD)  HEAD=$(git log -1 --format='%h %s')"
+git status --short | head -20
+find . -name go.mod -not -path './dashboard/node_modules/*'
+grep -n '^replace' go.mod || echo "no replace directives (correct)"
 ```
 
 **Findings**:
-- A `replace … => ../gremlyn-core` present → **normal for local dev**. Note it; it must not be in a tagged release.
-- Consumers pinning **different** core versions → ⚠️ WARNING, they'll behave differently.
-- Uncommitted changes in core while consumers are being tested → ⚠️ the consumers are testing against unversioned code.
+- More than one `go.mod` → 🔴 the module got split again; the merge is being undone by accident.
+- Any `replace` directive → 🔴. There is nothing left to replace, and a local-path replace breaks every fresh clone.
+- Uncommitted changes → informational, but **say so**: everything below tests the working tree, not `HEAD`.
+- **Version skew is no longer a possible failure class.** One module, one commit, one version across the CLI, both services and the shared engine. Do not look for it and do not report it.
 
 ---
 
-## Step 2 — Build & gate, per Go repo
+## Step 2 — Build & gate
 
 ```bash
 cd /home/sahra/Documents/sahra-perso/gremlyn
-for d in gremlyn-core gremlyn-shield gremlyn-arena; do
-  echo "=== $d"
-  (cd "$d" && go build ./... 2>&1 | head -20 && go vet ./... 2>&1 | head -20)
-done
+go build ./... 2>&1 | head -20
+go vet ./... 2>&1 | head -20
 ```
 
 Then the real gate (slower — run if the user wants depth):
 ```bash
-(cd gremlyn-core && make check) 2>&1 | tail -20
+make check 2>&1 | tail -20          # vet + lint + go test -race
+make build && ls -lh bin/           # → bin/{gremlyn,shield,arena}
 ```
 
-**Thresholds**: build failure = 🔴 CRITICAL. `go vet` output = 🟠. A core build failure implies both consumers are broken — check them regardless of what they report cached.
+**Thresholds**: build failure = 🔴 CRITICAL — and note that it now takes **all three binaries** down at once. That is the trade the merge made: no skew to diagnose, but no partially-green stack either. `go vet` output = 🟠. A `-race` failure inside `make check` = 🔴 and **never** a flake.
 
 ### CGO check
 ```bash
-(cd gremlyn-core && CGO_ENABLED=0 go build -o /tmp/gremlyn-cgotest ./cmd/gremlyn && echo "CGO_ENABLED=0 OK")
+CGO_ENABLED=0 go build -o /tmp/gremlyn-cgotest ./cmd/gremlyn && echo "CGO_ENABLED=0 OK"
 ```
-Failure = 🔴 CRITICAL — static cross-compiled binaries are how this ships.
-
-### Clean-clone check (only before tagging)
-A `replace` pointing at `../gremlyn-core` in a tagged release breaks every fresh clone of shield/arena. Verify the build resolves core from the module proxy before a release. Harmless in dev.
+Failure = 🔴 CRITICAL — static cross-compiled binaries are how this ships, and pure-Go `modernc.org/sqlite` is why it works today. The cause is almost always a newly added dependency pulling in C. `make build` already sets `CGO_ENABLED=0`, so a green `make build` covers all three binaries; run the explicit check when the dependency graph moved.
 
 ---
 
 ## Step 3 — Dashboard
 
 ```bash
-cd /home/sahra/Documents/sahra-perso/gremlyn/gremlyn-dashboard
+cd /home/sahra/Documents/sahra-perso/gremlyn/dashboard
 npm run typecheck 2>&1 | tail -20
 npm run lint 2>&1 | tail -10
 ```
 
-**Thresholds**: any `tsc` error = 🔴. A type error with no local dashboard change usually means the **Go DTOs moved and `lib/api/types.ts` wasn't updated** — that's the cross-repo contract detector doing its job.
+Full frontend gate, from the repo root: `make dashboard-check` (typecheck + lint + vitest + build).
+
+**Thresholds**: any `tsc` error = 🔴. A type error with no local dashboard change usually means the **Go DTOs moved and `dashboard/lib/api/types.ts` wasn't updated** — that's the Go↔TS contract detector doing its job. It is now a same-commit fix: the change that moved the DTO owns the type update.
 
 ---
 
@@ -104,11 +101,12 @@ ss -ltnp 2>/dev/null | grep -E ':(8081|8082|3000)' || true
 
 **Thresholds**: non-2xx on a service the user expected up = 🔴. > 2s = 🟠 degraded. Down is **normal** if they simply haven't started it — ask rather than alarm.
 
-To bring the stack up (3 terminals):
+To bring the stack up (3 terminals, from the repo root):
 ```bash
-cd gremlyn-shield    && go run ./cmd/shield      # :8081
-cd gremlyn-arena     && go run ./cmd/arena       # :8082
-cd gremlyn-dashboard && npm run dev              # :3000
+make build
+./bin/shield                    # :8081
+./bin/arena                     # :8082
+cd dashboard && npm run dev     # :3000
 ```
 
 **Check the independence property**: Shield down must not blank Arena's dashboard pages. If it does, that's a 🔴 UI bug worth reporting.
@@ -123,7 +121,7 @@ ls -lh ~/.gremlyn/ 2>/dev/null || echo "~/.gremlyn does not exist yet (fresh ins
 for db in shield arena; do
   f="$HOME/.gremlyn/$db.db"
   [ -f "$f" ] || { echo "$db: no DB yet"; continue; }
-  echo "=== $db  $(du -h "$f" | cut -f1)"
+  echo "=== $db  $(du -h "$f" | cut -f1)  modified $(date -d "@$(stat -c %Y "$f")" '+%F %T')"
   sqlite3 "$f" "PRAGMA integrity_check;" | head -3
   sqlite3 "$f" "PRAGMA journal_mode;"
   sqlite3 "$f" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;" | tr '\n' ' '; echo
@@ -136,12 +134,12 @@ sqlite3 ~/.gremlyn/arena.db  "SELECT COUNT(*) AS sessions FROM sessions;" 2>/dev
 
 **Thresholds**:
 - `integrity_check` ≠ `ok` = 🔴 CRITICAL
-- `journal_mode` not `wal` = 🟠 (concurrency will suffer)
-- **DB > 1 GB** = 🟠 → retention isn't pruning. This is the predictable failure of an inline proxy that writes per message. Route to `database-engineer`
-- Stale `-wal`/`-shm` with no live process = informational; SQLite recovers it. **Never delete a `-wal` with a live writer**
+- `journal_mode` not `wal` = 🟠 (the code sets `PRAGMA journal_mode=WAL` on open — if it reports otherwise, something opened this file wrong, and concurrency will suffer)
+- **DB > 1 GB** = 🟠 → retention isn't pruning. This is the predictable failure of an inline proxy that writes per message, and it arrives quietly. Route to `database-engineer`
+- Stale `-wal`/`-shm` with no live process = informational; SQLite recovers it. **Never delete a `-wal` with a live writer** (`pgrep -af 'bin/(shield|arena)'` before you even think about it)
 - No DB at all = fine, fresh install
 
-**Before suggesting any deletion**: `rm ~/.gremlyn/*.db` destroys the user's event history. Say that explicitly and get confirmation.
+**Before suggesting any deletion**: `rm ~/.gremlyn/*.db` destroys the user's event history and every recorded Arena session — permanently, with no export. Say that in those words and get explicit confirmation. Never run it as part of a health check.
 
 ---
 
@@ -162,34 +160,45 @@ curl -fsS localhost:8000/health 2>/dev/null || echo "ML sidecar down → L2 dete
 
 ## Step 7 — End-to-end: the proxy against a real MCP server
 
-The only check that proves the product works.
+The only check that proves the product works. **Do not skip it and do not accept "the process started" as a pass** — `gremlyn wrap` shipped broken for months precisely because nothing exercised the data path.
 
 ```bash
-cd /home/sahra/Documents/sahra-perso/gremlyn/gremlyn-core
-go build -o gremlyn ./cmd/gremlyn
-./gremlyn version
-./gremlyn doctor
-./gremlyn status
+cd /home/sahra/Documents/sahra-perso/gremlyn
+make build
+./bin/gremlyn version
+./bin/gremlyn doctor
+./bin/gremlyn status
 ```
 
 Then the real wire test:
 ```bash
-./gremlyn wrap -- npx @modelcontextprotocol/server-memory
+./bin/gremlyn wrap -- npx -y @modelcontextprotocol/server-memory
 ```
-Exercise `initialize`, `tools/list`, `tools/call`. The proxy must pass all three through and stay up.
 
-**Thresholds**: `gremlyn version` not reporting an injected version = 🟠 (ldflags stamping broken, unsupportable in the field). `doctor` reporting a problem = follow its guidance. Wrap mode failing = 🔴 CRITICAL, the core product is broken.
+Framing is **newline-delimited JSON — one object per line, no `Content-Length` header**. Feed these on stdin and require a response back for each, with a matching `id`:
+```
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"stack-health","version":"0"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+```
+`initialize` **and** `tools/list` must both round-trip. Then close stdin: the proxy must half-close (child stdin closed, responses still drained) and exit cleanly, not kill the child mid-response.
+
+**Thresholds**:
+- `gremlyn version` not reporting an injected version = 🟠 (ldflags stamping broken → unsupportable in the field)
+- An explicit `peer is using LSP Content-Length framing` error = 🔴 framing regression in `pkg/protocol`; the diagnostic already tells you which side is wrong
+- A request forwarded with **no response coming back**, or a response lost when stdin closes = 🔴 teardown regression in `pkg/proxy` (the shared-shutdown-channel bug, back)
+- Wrap mode failing at all = 🔴 CRITICAL, the core product is broken
+- `doctor` reporting a problem = follow its guidance
 
 ---
 
 ## Step 8 — Resource sanity
 
 ```bash
-pgrep -af 'shield|arena|next-server' || true
+pgrep -af 'bin/(shield|arena)|next-server' || true
 df -h ~ | tail -1
 ```
 
-Look for: orphaned `shield`/`arena` processes from a previous run holding a port or the SQLite write lock (a very common cause of "it won't start"), and disk pressure (event DBs grow).
+Look for: orphaned `shield`/`arena` processes from a previous run holding a port or the SQLite write lock (a very common cause of "it won't start"), leftover `gremlyn wrap` children from a killed session, and disk pressure (event DBs grow).
 
 ---
 
@@ -201,13 +210,14 @@ Look for: orphaned `shield`/`arena` processes from a previous run holding a port
 ## Verdict
 🟢 healthy | 🟡 degraded | 🔴 broken
 
-## Repos
-| repo | branch | HEAD | dirty | build | vet |
-|---|---|---|---|---|---|
-
-- Core version pinned: shield `<v>` · arena `<v>` — aligned? ✅/⚠️
-- Replace directives present: yes (normal for dev) / no
+## Repo & build
+- Branch `<name>` · HEAD `<sha> <subject>` · dirty: <n files>
+- Single module `github.com/gremlyn-ai/gremlyn`, no `replace`: ✅/🔴
+- `go build ./...` / `go vet ./...`: ✅/🟠/🔴
+- `make check` (vet + lint + test -race): ✅/🔴
 - `CGO_ENABLED=0`: ✅/🔴
+- `bin/{gremlyn,shield,arena}`: ✅/🔴
+- `make dashboard-check`: ✅/🔴
 
 ## Services
 | service | port | status | latency |
@@ -226,7 +236,7 @@ Look for: orphaned `shield`/`arena` processes from a previous run holding a port
 ## End-to-end
 - `gremlyn version`: <output>
 - `gremlyn doctor`: <summary>
-- wrap + real MCP server: ✅/🔴
+- wrap + real MCP server: `initialize` ✅/🔴 · `tools/list` ✅/🔴 · clean half-close ✅/🔴
 
 ## Findings
 ### 🔴 Critical
@@ -234,13 +244,15 @@ Look for: orphaned `shield`/`arena` processes from a previous run holding a port
 ### 🟢 OK
 
 ## Recommended actions
-1. <action> — <which repo / which command>
+1. <action> — <exact command, and where it runs>
 ```
 
 ## Rules
 
 - **Down ≠ broken.** A service the user simply hasn't started is not a finding. Ask.
 - **All optional services down is the correct default state.** Never report it as a problem.
-- **Always name which repo** a command runs in.
-- **Warn before anything destructive** — deleting a DB deletes the user's history.
+- **Version skew is not a failure class here.** One module, one version. Never offer it as an explanation.
+- **Always give the exact command and where it runs** — repo root or `dashboard/`.
+- **Warn before anything destructive** — deleting a DB deletes the user's history, irreversibly.
+- **A green build is not a working product.** Step 7 is the one that proves it; both bugs that made `wrap` useless passed every build.
 - A silent fail-open (a dependency down and traffic passing unchecked with no event) is the single most serious finding this check can produce. Escalate it as 🔴 regardless of anything else being green.

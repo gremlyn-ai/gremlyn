@@ -111,7 +111,9 @@ func parseMCPConfig(path, clientName string) (*MCPClientConfig, error) {
 
 // RewriteForWrap transforms a stdio-based MCP server entry to route through gremlyn wrap.
 func RewriteForWrap(entry MCPServerEntry, gremlynBinaryPath, configPath string) MCPServerEntry {
-	newArgs := []string{"wrap", "--config", configPath, "--"}
+	// 4 fixed wrap args + the original command + its own args.
+	newArgs := make([]string, 0, 5+len(entry.Args))
+	newArgs = append(newArgs, "wrap", "--config", configPath, "--")
 
 	// Preserve original command as first arg after --.
 	newArgs = append(newArgs, entry.Command)

@@ -14,7 +14,7 @@ import (
 
 func newTestDB(t *testing.T) *DB {
 	t.Helper()
-	db, err := New(":memory:", zerolog.Nop())
+	db, err := New(context.Background(), ":memory:", zerolog.Nop())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	return db
@@ -242,7 +242,7 @@ func TestAlertsRepo_CountBySeverity(t *testing.T) {
 func TestMigrationIdempotent(t *testing.T) {
 	db := newTestDB(t)
 	// Running migrate again should be a no-op.
-	require.NoError(t, db.migrate())
+	require.NoError(t, db.migrate(context.Background()))
 }
 
 // ── JSON round-trip ──

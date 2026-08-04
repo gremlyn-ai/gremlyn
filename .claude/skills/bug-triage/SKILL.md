@@ -1,6 +1,6 @@
 ---
 name: bug-triage
-description: Triage and fix bugs across the four Gremlyn repos — classify (unclear / feature / duplicate / works-as-intended / fixable), locate the root cause, fix on a branch with a regression test, and report. Use when the user says "triage bugs", "bug manager", "fix this bug", "work the backlog", or runs /bug-triage.
+description: Triage and fix bugs in the Gremlyn repo — classify (unclear / feature / duplicate / works-as-intended / fixable), locate the root cause, fix on a branch with a regression test, and report. Use when the user says "triage bugs", "bug manager", "fix this bug", "work the backlog", or runs /bug-triage.
 ---
 
 # Bug Triage
@@ -15,52 +15,55 @@ Triage and fix bugs in Gremlyn. Works from a local backlog file, a GitHub issue,
 /bug-triage "<description>"      # a bug described inline
 ```
 
-## Step 0 — Which repo, and which version
+## Step 0 — Orient: what code, and what is behind the proxy
 
-Before reading any code. This is the step that saves the most time in a four-repo project.
+Before reading any code. Cheap, and it stops you debugging a symptom of a dirty tree.
 
 ```bash
 cd /home/sahra/Documents/sahra-perso/gremlyn
-for d in gremlyn-core gremlyn-shield gremlyn-arena gremlyn-dashboard; do
-  echo "=== $d  $(git -C $d log -1 --format='%h %s')"
-done
-grep -H 'gremlyn-core' gremlyn-shield/go.mod gremlyn-arena/go.mod
+echo "branch=$(git rev-parse --abbrev-ref HEAD)  HEAD=$(git log -1 --format='%h %s')"
+git status --short | head -20
+./bin/gremlyn version 2>/dev/null || make build
 ```
 
-**Half the confusing bugs in this project are version skew, not logic errors.** A shield bug that appeared with no shield change is almost always a `pkg/` change. Check that before anything else.
+One module, one commit — **there is no version skew to rule out**. What replaces that question:
+- **Is the tree dirty?** Uncommitted work is the most common source of "it broke and I didn't touch anything". Name the dirty files in the report.
+- **Is the binary stale?** `./bin/*` is built, not live. A bug that reproduces with `./bin/shield` but not `go run ./cmd/shield` is a stale binary, not a bug.
+- **Which layer owns the symptom?** `pkg/proxy` + `pkg/protocol` are on the hot path of everything: a change there breaks the CLI, Shield and Arena in the same commit. Widen the blast radius accordingly, don't narrow it.
 
-If the report comes from a user, get `gremlyn version` output, their MCP client config, and which MCP servers sit behind the proxy. If you had to ask for any of it, that's a missing `gremlyn doctor` check — note it as a follow-up.
+If the report comes from a user, get `gremlyn version` output, their MCP client config, and **which MCP servers sit behind the proxy** (name and version — a peer that speaks LSP-style framing produces a very different failure than a conforming one). If you had to ask for any of it, that's a missing `gremlyn doctor` check — note it as a follow-up.
 
 ## Step 1 — Reproduce
 
 A bug you can't reproduce is a bug you can't verify you fixed.
 
 ```bash
+cd /home/sahra/Documents/sahra-perso/gremlyn
+make build
+
 # is it in the proxy path?
-cd gremlyn-core && go build -o gremlyn ./cmd/gremlyn
-./gremlyn wrap -- npx @modelcontextprotocol/server-memory
+./bin/gremlyn wrap -- npx -y @modelcontextprotocol/server-memory
 
 # is it service-side?
-cd gremlyn-shield && go run ./cmd/shield      # :8081
-cd gremlyn-arena  && go run ./cmd/arena       # :8082
+./bin/shield                      # :8081
+./bin/arena                       # :8082
 
 # is it dashboard-side?
-cd gremlyn-dashboard && npm run dev           # :3000
+cd dashboard && npm run dev       # :3000
 ```
 
 Check the operational causes before the code ones — they're more common than logic bugs:
-- an orphaned `shield`/`arena` process holding a port or the SQLite write lock (`pgrep -af 'shield|arena'`)
-- a stale binary against a migrated DB
+- an orphaned `shield`/`arena` process holding a port or the SQLite write lock (`pgrep -af 'bin/(shield|arena)'`)
+- a stale binary against a migrated DB — rebuild before believing anything
 - `~/.gremlyn/` permissions, disk full
 - an optional dependency down (Redis, ML sidecar) putting a layer on its degraded path
 
 ## Step 2 — Classify
 
-Read the report, then trace the root cause in code (Grep/Read). Read the relevant `CLAUDE.md` and `docs/` first — for behavior questions, `.claude/agents/mcp-domain-expert.md` documents what the semantics are *supposed* to be, which often settles "bug or not" immediately.
+Read the report, then trace the root cause in code (Grep/Read). Read `CLAUDE.md` and the relevant `docs/{core,shield,arena,dashboard}.md` first — for behavior questions, `.claude/agents/mcp-domain-expert.md` documents what the semantics are *supposed* to be, which often settles "bug or not" immediately.
 
 | Branch | When | Action |
 |--------|------|--------|
-| **Version skew** | Consumer broke with no consumer change | Not a bug in the consumer. Report the core commit responsible. Fix belongs in core, or the consumer needs a bump |
 | **Unclear / no repro** | Missing steps, version, or MCP server context; can't locate the defect | Ask for the SPECIFIC missing info. Stop |
 | **Actually a feature** | Requests new behavior, not a defect | Say why it's a feature, route to `product-manager`. Stop |
 | **Duplicate** | Same root cause as another open item | Reference it. Stop |
@@ -72,33 +75,36 @@ Read the report, then trace the root cause in code (Grep/Read). Read the relevan
 
 - **"Shield blocked something legitimate"** — that's a **false positive**, the expensive failure mode. It's a real bug, and the fix is a detection change with negative corpus cases (`/new-detection-rule`), never a widened pattern applied by feel.
 - **"The agent hung"** — check whether Shield produced a **silent drop instead of a JSON-RPC error**. A block the agent can't see becomes a hang, and that's a bug in the block path, not the agent.
+- **"The proxy forwarded a request and no response came back"** — suspect **framing** or **teardown**, in that order, before suspecting the peer. MCP over stdio is newline-delimited JSON (`LineFramer`, frames capped at 16 MiB); `ContentLengthFramer` is LSP-only and a `Content-Length` header from a peer now yields an explicit diagnostic. Teardown half-closes: child stdin closed, then responses drained until the server closes, bounded by a 10s grace, and `stderr` never triggers shutdown. **Both bugs are fixed**, so a fresh report of this shape means a regression in `pkg/protocol` or `pkg/proxy` — `git log -p` those two packages first. Route to `proxy-engine-developer`.
+- **"A construction-only test suite was green while the feature was completely broken"** — not a test-quality nit, a triage signal. When a bug reaches a user through a path that has **no data-path test**, the regression test must exercise the real path (bytes in → bytes out, via `WithClientIO` for wrap), never the constructor. `wrap` shipped two fatal bugs behind a green suite that only ever called `NewWrapProxy`. If your fix's test doesn't send a message and read the answer, you haven't pinned the bug.
 - **"The score changed for the same session"** — determinism or purity is broken. Suspect a clock, `math/rand` unseeded, map-iteration order in a decision, or a not-injected path that isn't a byte-exact no-op. Route to `chaos-gremlin-designer`.
-- **"A dashboard type error appeared out of nowhere"** — the Go DTOs moved and `lib/api/types.ts` didn't. That's the cross-repo contract detector working, not a dashboard bug.
+- **"A dashboard type error appeared out of nowhere"** — the Go DTOs moved and `dashboard/lib/api/types.ts` didn't. That's the Go↔TS contract detector working, not a dashboard bug — and it's now fixable in the same commit.
 - **"Passes on my machine"** — SQLite vs PostgreSQL divergence. The two repository implementations drifted on a dialect trap (booleans, timestamps, `ALTER`). Route to `database-engineer`.
 - **A `-race` report in the wild** — never a flake. It's a correctness and, on a decision path, a security bug.
 
 ## Step 3 — Fix
 
-Work on a branch in **the repo that owns the bug**:
+One repo, one branch:
 
 ```bash
-cd <the-right-repo>
+cd /home/sahra/Documents/sahra-perso/gremlyn
 git checkout -b fix/<slug>
 ```
 
 Route the fix by surface:
 - `pkg/proxy`, `pkg/protocol` → `proxy-engine-developer`
-- `shield/internal/{detection,policy,behavioral}` → `detection-pipeline-engineer`
-- `arena/internal/{gremlins,scoring,session}` → `chaos-gremlin-designer`
+- `internal/shield/{detection,policy,behavioral}` → `detection-pipeline-engineer`
+- `internal/arena/{gremlins,scoring,session}` → `chaos-gremlin-designer`
 - general Go (handlers, services, repos, CLI, config) → `go-backend-developer`
-- dashboard → `frontend-nextjs-developer`
-- schema / query → `database-engineer`
+- `dashboard/` → `frontend-nextjs-developer`
+- schema / query / `migrations/` → `database-engineer`
 
 ### Rules for the fix
 
 - **Write the regression test first**, the one that would have caught this. A fix with no test invites the same bug back.
+- **The test must exercise the path the bug travelled**, not the one that's easy to construct.
 - **Minimal.** Only the reported defect. No scope creep, no drive-by refactor.
-- **If the fix is in `pkg/`**, it's a two-part job: core fix + tagged version + consumer bumps. Say so; don't try to do it as one commit.
+- **A `pkg/` fix is one commit, but its blast radius is the whole repo** — CLI, Shield and Arena all import it. Run the full gate, not just the package's tests.
 - **A schema fix lands in both stores.**
 - **A detection fix ships negative corpus cases.**
 - Never weaken a test to make the fix pass.
@@ -106,16 +112,15 @@ Route the fix by surface:
 ## Step 4 — Verify
 
 ```bash
-# in the fixed repo
+cd /home/sahra/Documents/sahra-perso/gremlyn
 make check                          # vet + lint + go test -race
 go test -race -count=2 ./...        # flake check
-# dashboard
-npm run typecheck && npm run lint && npx vitest run && npm run build
+make dashboard-check                # typecheck + lint + vitest + build
 ```
 
-Then **reproduce the original bug and confirm it's gone**, by the same path you used in Step 1. A green suite is not proof the reported symptom is fixed.
+Then **reproduce the original bug and confirm it's gone**, by the same path you used in Step 1. A green suite is not proof the reported symptom is fixed — in this repo that mistake has already shipped a product that never worked.
 
-If the fix touched the proxy: `./gremlyn wrap -- npx @modelcontextprotocol/server-memory` and exercise `initialize`/`tools/list`/`tools/call`.
+If the fix touched the proxy: `./bin/gremlyn wrap -- npx -y @modelcontextprotocol/server-memory`, and round-trip `initialize`, `tools/list`, `tools/call` — one JSON object per line, a matching response for each.
 
 If the fix touched detection: run real traffic through and confirm nothing legitimate broke.
 
@@ -124,10 +129,10 @@ If the fix touched detection: run real traffic through and confirm nothing legit
 ```markdown
 ## Bug: <title>
 
-### Repo & version
-- Repo: <which>
-- Core pinned: shield `<v>` · arena `<v>`
-- Version skew ruled out: ✅
+### Context
+- Branch / HEAD: `<name>` · `<sha>`
+- Tree clean at repro: ✅ / dirty (<files>)
+- MCP servers behind the proxy: <names>
 
 ### Reproduction
 <the exact steps / command that shows it>
@@ -136,15 +141,16 @@ If the fix touched detection: run real traffic through and confirm nothing legit
 <file:line + why it happens — the mechanism, not the symptom>
 
 ### Classification
-<version-skew | unclear | feature | duplicate | already-fixed | WAI | fixed>
+<unclear | feature | duplicate | already-fixed | WAI | fixed>
 
 ### Fix
-- Branch: `fix/<slug>` in `<repo>`
+- Branch: `fix/<slug>`
 - Changes: <file:line, one line each>
 - Regression test: <test name — the one that now fails without the fix>
+- Path it exercises: <the real data path, or say why a unit test is sufficient>
 
-### Cross-repo impact
-- Core `pkg/` touched: yes/no → <consumers needing a bump>
+### Blast radius
+- `pkg/` touched: yes/no → <what else imports it>
 - Both stores updated: yes/no/n-a
 - Dashboard types updated: yes/no/n-a
 
@@ -160,10 +166,10 @@ If the fix touched detection: run real traffic through and confirm nothing legit
 
 ## Rules
 
-- **Check version skew before reading code.** It's the most common cause of a confusing report here.
+- **Check the tree and the binary before reading code.** Dirty working copy and stale `./bin` explain more confusing reports than logic errors.
 - Reproduce before fixing; re-reproduce after.
-- A regression test is part of the fix, not optional.
+- A regression test is part of the fix, not optional — and it must run the path the bug travelled.
 - Never fix a false positive by loosening a pattern without negative corpus cases.
 - A `-race` report is never dismissed as flaky.
-- Core `pkg/` fixes are always a multi-repo, multi-commit job — never pretend otherwise.
+- A `pkg/` fix is one commit and three consumers — verify the whole repo, never just the package.
 - Report the adjacent bugs you found without fixing them. Don't silently expand scope.

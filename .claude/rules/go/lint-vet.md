@@ -20,10 +20,12 @@ Sub-targets when you need them piecemeal:
 - `make lint` — `golangci-lint run`
 - `make test` — `go test ./... -race -coverprofile=coverage.out`
 - `make coverage` — HTML coverage report
-- `make build` — the binary
+- `make build` — all three binaries (`bin/gremlyn`, `bin/shield`, `bin/arena`)
+- `make integration` — the `//go:build integration` suite
+- `make tidy` — `go mod tidy`
 - `gofmt -l .` / `goimports -l .` — list unformatted files
 
-The three Go repos (`gremlyn-core`, `gremlyn-shield`, `gremlyn-arena`) expose **identical targets**. Only `BINARY_NAME` differs. If you find yourself learning a repo's targets, that's a bug — fix the Makefile.
+One Makefile at the repo root covers the whole module: `cmd/{gremlyn,shield,arena}`, every `pkg/` and every `internal/` package. If you find yourself running raw `go` commands to build or test a subtree, that's a bug — fix the Makefile.
 
 ## 2. The bar
 
@@ -32,7 +34,7 @@ The three Go repos (`gremlyn-core`, `gremlyn-shield`, `gremlyn-arena`) expose **
 - **`golangci-lint run` must be clean** — zero findings, not "only minor ones". The enabled linters are: `errcheck, gosimple, govet, ineffassign, staticcheck, unused, gofmt, goimports, misspell, unconvert, gocritic, revive`.
 - **`go test -race ./...` must pass.** `-race` is not optional in this codebase — see §4.
 
-Keep `.golangci.yml` in sync across the three repos. A rule that fires in core but not shield produces inconsistent code and wastes review cycles.
+One `.golangci.yml` at the root governs the whole module — `pkg/`, `internal/cli`, `internal/shield`, `internal/arena` are held to the same rules. Don't add a per-directory exclusion to get a diff through; fix the code.
 
 ## 3. Fixing common lint friction (don't reach for blanket ignores)
 
@@ -44,7 +46,7 @@ Keep `.golangci.yml` in sync across the three repos. A rule that fires in core b
 - **`unconvert`** — remove the redundant conversion; if the conversion looked necessary, the underlying type is probably wrong.
 - **`ineffassign`** — usually a real bug: an error assigned and then overwritten before it's checked.
 
-**A `//nolint` needs a one-line reason on the same line and must be as narrow as possible** (`//nolint:gosec // path is a validated internal constant`). A bare `//nolint` is a review block. Never `//nolint` in `internal/detection/` or `internal/policy/` without `security-reviewer` sign-off — that's the code the product exists for.
+**A `//nolint` needs a one-line reason on the same line and must be as narrow as possible** (`//nolint:gosec // path is a validated internal constant`). A bare `//nolint` is a review block. Never `//nolint` in `internal/shield/detection/` or `internal/shield/policy/` without `security-reviewer` sign-off — that's the code the product exists for.
 
 ## 4. `-race` is part of the gate, not an extra
 
@@ -65,12 +67,14 @@ go test -bench=. -benchmem -count=10 ./pkg/proxy/ > new.txt && benchstat old.txt
 
 Report `ns/op`, `B/op`, `allocs/op` before and after. Use `benchstat` — a delta between two single runs is noise, not a result.
 
-## 6. Cross-repo gate
+## 6. One module, one gate
 
-`gremlyn-shield` and `gremlyn-arena` import `pkg/...` via a `replace` directive in local dev. Two extra checks that `make check` alone won't catch:
+Everything lives in `github.com/gremlyn-ai/gremlyn`: no `replace` directive, no version-bump chain, no per-repo run.
 
-- **After any core `pkg/` change**, run `make check` in **all three** repos. Core passing its own tests proves nothing about its consumers.
-- **Before tagging**, verify the build works with the `replace` removed (clean-clone semantics). A shipped `replace` pointing at `../gremlyn-core` breaks every fresh clone.
+- **`make check` at the root compiles and tests `pkg/`, `internal/cli`, `internal/shield` and `internal/arena` together.** A `pkg/` change that breaks a consumer fails the same command that runs the change's own tests — so a `pkg/` change and its consumer updates belong in **one commit**, not a sequence of them.
+- `make tidy` after touching imports. A stale `go.mod`/`go.sum` is a broken build for the next clone.
+- `make dashboard-check` when the diff touches `dashboard/` — the Go gate says nothing about TypeScript.
+- `make integration` needs `docker compose up -d postgres redis`; `make check` must stay green **without** them — zero-config is a product feature.
 
 ## 7. Non-negotiables (a violation blocks the diff)
 

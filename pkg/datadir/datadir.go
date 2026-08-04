@@ -24,7 +24,7 @@ func Dir() (string, error) {
 		dir = filepath.Join(home, dirName)
 	}
 
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
 	return dir, nil

@@ -65,7 +65,7 @@ func run(logger zerolog.Logger) error {
 		if err != nil {
 			return fmt.Errorf("resolving data dir: %w", err)
 		}
-		db, err := sqlitestore.New(dbPath, logger)
+		db, err := sqlitestore.New(ctx, dbPath, logger)
 		if err != nil {
 			return fmt.Errorf("opening sqlite: %w", err)
 		}

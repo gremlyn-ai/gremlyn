@@ -1,6 +1,6 @@
 ---
 name: new-gremlin
-description: Add a new chaos gremlin to gremlyn-arena end to end — the Gremlin interface implementation, registry entry, bounds and config, scoring dimension mapping, table-driven + determinism tests, and the dashboard selector metadata. Use when the user says "new gremlin", "add a failure injector", "inject X into the pipeline", or runs /new-gremlin.
+description: Add a new chaos gremlin to Arena end to end — the Gremlin interface implementation, registry entry, bounds and config, scoring dimension mapping, table-driven + determinism tests, and the dashboard selector metadata. Use when the user says "new gremlin", "add a failure injector", "inject X into the pipeline", or runs /new-gremlin.
 ---
 
 # New Gremlin
@@ -26,13 +26,13 @@ If you can't answer all five, stop and route to `mcp-domain-expert`. A gremlin t
 ## Files to touch
 
 ```
-internal/gremlins/<name>.go              → the implementation
-internal/gremlins/gremlins_test.go       → table-driven tests
-internal/gremlins/scenarios_test.go      → cross-component behavior
-internal/gremlins/registry.go            → register + metadata the dashboard renders
-internal/scoring/dimensions.go           → only if a new dimension is needed
-internal/session/recorder.go             → only if a new event field is needed
-gremlyn-arena.yaml / config              → the knobs
+internal/arena/gremlins/<name>.go              → the implementation
+internal/arena/gremlins/gremlins_test.go       → table-driven tests
+internal/arena/gremlins/scenarios_test.go      → cross-component behavior
+internal/arena/gremlins/registry.go            → register + metadata the dashboard renders
+internal/arena/scoring/dimensions.go           → only if a new dimension is needed
+internal/arena/session/recorder.go             → only if a new event field is needed
+Arena.yaml / config              → the knobs
 ─────────────────────────────────────────────────────────────────
 dashboard/lib/api/types.ts       → if the gremlin DTO shape changed
 ```
@@ -135,7 +135,7 @@ func TestTruncationGremlin_NoOpIsExact(t *testing.T) {
 ```
 
 - [ ] **Envelope test**: `id`, `jsonrpc`, `method` survive (unless a declared exception)
-- [ ] `go test -race ./internal/gremlins/ -count=2` clean
+- [ ] `go test -race ./internal/arena/gremlins/ -count=2` clean
 
 ## Registry entry
 
@@ -158,7 +158,7 @@ The description carries personality **and** the mechanic — a user must finish 
 
 ## If a new score dimension is needed
 
-`internal/scoring/dimensions.go`:
+`internal/arena/scoring/dimensions.go`:
 - [ ] Bounded **0–100**, monotone (more resilient → higher)
 - [ ] Computable from recorded events alone
 - [ ] **Every edge case defined** — empty session, all survived, all crashed, gremlin never fired. No `NaN`, no divide-by-zero
@@ -169,7 +169,7 @@ The description carries personality **and** the mechanic — a user must finish 
 ## Done means
 
 ```bash
-go test -race -count=2 ./internal/gremlins/ ./internal/scoring/ ./internal/session/
+go test -race -count=2 ./internal/arena/gremlins/ ./internal/arena/scoring/ ./internal/arena/session/
 make check
 go run ./cmd/arena          # :8082 — confirm the gremlin appears in GET /api/v1/gremlins
 ```

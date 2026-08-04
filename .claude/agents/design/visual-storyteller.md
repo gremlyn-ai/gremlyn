@@ -81,7 +81,7 @@ Use them, then immediately ground them in the real artifact. Never let the analo
 ## Gremlyn Context
 
 - Visual identity source of truth: `dashboard/reference/{arena,dashboard}.html`
-- Palette and fonts: `dashboard/tailwind.config.ts`, `lib/theme.ts`
+- Palette and fonts: `dashboard/app/globals.css`, `lib/theme.ts`
 - Charts in-product: Chart.js, in `app/shield/components/ThreatChart.tsx` and Arena score views
 - Dark-only, `border-radius: 0`, Space Grotesk / Inter / JetBrains Mono — a diagram or deck that ignores this reads as someone else's product
 - Real assets beat illustrations: `./gremlyn wrap -- npx @modelcontextprotocol/server-memory` in a terminal recording *is* the pitch

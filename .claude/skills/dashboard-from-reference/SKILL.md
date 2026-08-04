@@ -1,6 +1,6 @@
 ---
 name: dashboard-from-reference
-description: Build or refactor a gremlyn-dashboard page or component so it matches the GREMLYN_OS reference HTML prototypes exactly — reading reference/arena.html or reference/dashboard.html first, then wiring real API data, all four states, and tests. Use when the user says "build this page", "match the reference", "implement the design", "refactor this component", or runs /dashboard-from-reference.
+description: Build or refactor a the dashboard page or component so it matches the GREMLYN_OS reference HTML prototypes exactly — reading reference/arena.html or reference/dashboard.html first, then wiring real API data, all four states, and tests. Use when the user says "build this page", "match the reference", "implement the design", "refactor this component", or runs /dashboard-from-reference.
 ---
 
 # Dashboard From Reference
@@ -20,7 +20,7 @@ These are the **single source of truth for every visual decision** and they are 
 
 This skill touches **only `dashboard/`**. It is a pure presentation change.
 
-- **Never** edit Go code — no `gremlyn-core/`, `gremlyn-shield/`, `gremlyn-arena/`. No handlers, services, repositories, migrations.
+- **Never** edit Go code — no `pkg/`, `internal/shield/`, `internal/arena/`. No handlers, services, repositories, migrations.
 - **Never** change an API contract, endpoint path, or response shape. The design changes how data is *displayed*, never what is fetched.
 - Existing hooks, `lib/api/*`, and stores are **read-only inputs** — reuse them verbatim.
 - If the design appears to need a field the API doesn't return: **stop and tell the user.** Do not add it backend-side. Mock or omit it in the frontend and flag it as a follow-up.
@@ -30,7 +30,7 @@ If the work genuinely requires a Go change, hand it to `go-backend-developer` as
 ## Ground truth to read before mapping
 
 - Existing components to extend: `components/{Sidebar,TopBar,StatusFooter,GlobalTerminal,ClientShell}.tsx`, `app/shield/components/*`, `app/arena/components/*`
-- Tokens: `tailwind.config.ts` and `lib/theme.ts` — **use the token, never the hex**
+- Tokens: `app/globals.css` (@theme) and `lib/theme.ts` — **use the token, never the hex**
 - API client: `lib/api/{client,shield,arena,types}.ts`
 - Hooks: `lib/hooks/{useShieldData,useArenaData,useArenaWebSocket}.ts`
 - Stores: `lib/stores/{shieldStore,arenaStore,terminalStore}.ts`
@@ -113,7 +113,7 @@ npx vitest run
 ## Done means
 
 ```bash
-cd gremlyn-dashboard
+cd dashboard
 npm run typecheck    # zero errors
 npm run lint
 npx vitest run

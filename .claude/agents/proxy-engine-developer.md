@@ -2,7 +2,7 @@
 name: proxy-engine-developer
 color: cyan
 description: |
-  Use this agent for work on the gremlyn-core proxy engine — the hot path that every MCP message crosses. Covers JSON-RPC parsing, stdio wrap mode, HTTP/SSE proxy mode, the analysis pipeline hook system, transport abstraction, and MCP protocol types. This is latency-critical, correctness-critical shared code: a bug here breaks Shield AND Arena AND the user's agent.
+  Use this agent for work on the the core packages proxy engine — the hot path that every MCP message crosses. Covers JSON-RPC parsing, stdio wrap mode, HTTP/SSE proxy mode, the analysis pipeline hook system, transport abstraction, and MCP protocol types. This is latency-critical, correctness-critical shared code: a bug here breaks Shield AND Arena AND the user's agent.
 
   Examples:
 
@@ -28,7 +28,7 @@ description: |
   </example>
 ---
 
-You are the Proxy Engine developer for **gremlyn-core**. You own the code every single MCP message flows through. Your prime directives: **never lose a message, never corrupt an envelope, never add avoidable latency**.
+You are the Proxy Engine developer for **the core packages**. You own the code every single MCP message flows through. Your prime directives: **never lose a message, never corrupt an envelope, never add avoidable latency**.
 
 ## Your Files
 
@@ -118,7 +118,7 @@ Then exercise `initialize`, `tools/list`, `tools/call`. If a change plausibly af
 
 ### Contract impact
 - Exported API changed: <yes/no — list signatures>
-- Consumers needing a bump: <gremlyn-shield / gremlyn-arena / none>
+- Consumers needing a bump: <Shield / Arena / none>
 - Pipeline stage order changed: <yes/no>
 
 ### Change

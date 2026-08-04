@@ -2,7 +2,7 @@
 name: frontend-nextjs-developer
 color: magenta
 description: |
-  Use this agent to implement or modify the gremlyn-dashboard frontend — Next.js 15 App Router pages, React 19 components, Zustand stores, API client layer, WebSocket integration, Tailwind 4 styling in the GREMLYN_OS aesthetic.
+  Use this agent to implement or modify the the dashboard frontend — Next.js 15 App Router pages, React 19 components, Zustand stores, API client layer, WebSocket integration, Tailwind 4 styling in the GREMLYN_OS aesthetic.
 
   Examples:
 
@@ -28,7 +28,7 @@ description: |
   </example>
 ---
 
-You are an expert Next.js / React / TypeScript developer for **gremlyn-dashboard**. You build production UI that matches the GREMLYN_OS aesthetic exactly.
+You are an expert Next.js / React / TypeScript developer for **the dashboard**. You build production UI that matches the GREMLYN_OS aesthetic exactly.
 
 ## READ FIRST, EVERY TIME
 
@@ -124,7 +124,7 @@ Why: an inlined constant gets duplicated the moment a second consumer needs it, 
 - Buttons: no radius, `font-mono font-bold tracking-widest uppercase`.
 - Icons: `<span className="material-symbols-outlined">name</span>` — Material Symbols only.
 
-Color tokens live in `tailwind.config.ts` and `lib/theme.ts`. **Use the token, never the hex** in a component.
+Color tokens live in `app/globals.css` (@theme) and `lib/theme.ts`. **Use the token, never the hex** in a component.
 
 ## WebSocket Discipline
 

@@ -4,6 +4,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -20,7 +21,7 @@ type DB struct {
 
 // New opens a SQLite database at the given path, applies pragmas for
 // performance and correctness, and runs embedded migrations.
-func New(dbPath string, logger zerolog.Logger) (*DB, error) {
+func New(ctx context.Context, dbPath string, logger zerolog.Logger) (*DB, error) {
 	pool, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite %s: %w", dbPath, err)
@@ -33,14 +34,14 @@ func New(dbPath string, logger zerolog.Logger) (*DB, error) {
 		"PRAGMA synchronous=NORMAL",
 	}
 	for _, p := range pragmas {
-		if _, err := pool.Exec(p); err != nil {
+		if _, err := pool.ExecContext(ctx, p); err != nil {
 			_ = pool.Close()
 			return nil, fmt.Errorf("setting pragma %q: %w", p, err)
 		}
 	}
 
 	db := &DB{pool: pool, logger: logger}
-	if err := db.migrate(); err != nil {
+	if err := db.migrate(ctx); err != nil {
 		_ = pool.Close()
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
@@ -65,8 +66,8 @@ func (db *DB) Events() *EventsRepo {
 }
 
 // migrate runs embedded SQL migrations using a simple version table.
-func (db *DB) migrate() error {
-	_, err := db.pool.Exec(`CREATE TABLE IF NOT EXISTS _migrations (
+func (db *DB) migrate(ctx context.Context) error {
+	_, err := db.pool.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _migrations (
 		version INTEGER PRIMARY KEY,
 		applied_at TEXT NOT NULL
 	)`)
@@ -75,23 +76,24 @@ func (db *DB) migrate() error {
 	}
 
 	var count int
-	if err := db.pool.QueryRow("SELECT COUNT(*) FROM _migrations WHERE version = 1").Scan(&count); err != nil {
+	if err := db.pool.QueryRowContext(ctx, "SELECT COUNT(*) FROM _migrations WHERE version = 1").Scan(&count); err != nil {
 		return fmt.Errorf("checking migration version: %w", err)
 	}
 	if count > 0 {
 		return nil
 	}
 
-	tx, err := db.pool.Begin()
+	tx, err := db.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin migration tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck // rollback on committed tx is no-op
+	// Rollback on an already-committed transaction is a no-op.
+	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.Exec(migrationSQL); err != nil {
+	if _, err := tx.ExecContext(ctx, migrationSQL); err != nil {
 		return fmt.Errorf("executing migration: %w", err)
 	}
-	if _, err := tx.Exec("INSERT INTO _migrations (version, applied_at) VALUES (1, ?)", formatTime(time.Now())); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO _migrations (version, applied_at) VALUES (1, ?)", formatTime(time.Now())); err != nil {
 		return fmt.Errorf("recording migration: %w", err)
 	}
 

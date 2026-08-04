@@ -359,17 +359,30 @@ func buildNewInstructionsPattern() string {
 
 // NewRegexDetector creates a new RegexDetector with all compiled pattern groups.
 func NewRegexDetector() *RegexDetector {
-	var patterns []regexPattern
-	patterns = append(patterns, promptInjectionPatterns()...)
-	patterns = append(patterns, indirectInjectionPatterns()...)
-	patterns = append(patterns, encodingAttackPatterns()...)
-	patterns = append(patterns, sqlInjectionPatterns()...)
-	patterns = append(patterns, commandInjectionPatterns()...)
-	patterns = append(patterns, pathTraversalPatterns()...)
-	patterns = append(patterns, xssPatterns()...)
-	patterns = append(patterns, dataExfiltrationPatterns()...)
-	patterns = append(patterns, suspiciousURLPatterns()...)
-	patterns = append(patterns, piiPatterns()...)
+	// Groups are concatenated in this exact order; scan order is part of the
+	// detector's behaviour.
+	groups := [][]regexPattern{
+		promptInjectionPatterns(),
+		indirectInjectionPatterns(),
+		encodingAttackPatterns(),
+		sqlInjectionPatterns(),
+		commandInjectionPatterns(),
+		pathTraversalPatterns(),
+		xssPatterns(),
+		dataExfiltrationPatterns(),
+		suspiciousURLPatterns(),
+		piiPatterns(),
+	}
+
+	total := 0
+	for _, g := range groups {
+		total += len(g)
+	}
+
+	patterns := make([]regexPattern, 0, total)
+	for _, g := range groups {
+		patterns = append(patterns, g...)
+	}
 	return &RegexDetector{patterns: patterns}
 }
 

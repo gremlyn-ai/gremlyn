@@ -2,7 +2,7 @@
 name: design-to-gremlyn
 description: >
   Pull a design from Claude Design (claude.ai/design) or Figma and implement it in the
-  gremlyn-dashboard as real Next.js + TypeScript, mapped onto the existing GREMLYN_OS
+  the dashboard as real Next.js + TypeScript, mapped onto the existing GREMLYN_OS
   components and tokens. Use when the user runs /design-to-gremlyn [URL] [PAGE], or says
   "implémente ce design", "pousse ce design dans le dashboard", "design to code",
   "code cette page". URL is a claude.ai/design/p/<projectId> link or a figma.com URL;
@@ -19,7 +19,7 @@ Take a design captured in Claude Design or Figma and ship it as a real, wired-up
 
 This skill touches **only `dashboard/`**. It is a pure presentation change.
 
-- **NEVER** edit Go code — no `gremlyn-core/`, `gremlyn-shield/`, `gremlyn-arena/`. No handlers, services, repositories, migrations, config.
+- **NEVER** edit Go code — no `pkg/`, `internal/shield/`, `internal/arena/`. No handlers, services, repositories, migrations, config.
 - **NEVER** change an API contract, endpoint path, or response shape. The design changes how data is *displayed*, never what is fetched.
 - Existing hooks (`lib/hooks/`), API methods (`lib/api/`), stores (`lib/stores/`), and types are **read-only inputs** — reuse them verbatim.
 - If the design seems to need a field the API doesn't return: do **not** add it backend-side. Mock or omit it in the frontend and **flag it to the user** as a follow-up ticket.
@@ -42,7 +42,7 @@ The invariants that can't be quietly overridden: **dark-only · `border-radius: 
 ## Ground truth to read before mapping
 
 - **Reference**: `reference/arena.html` (red, Arena) · `reference/dashboard.html` (green, Shield)
-- **Tokens**: `tailwind.config.ts`, `lib/theme.ts` — use the token, never the hex
+- **Tokens**: `app/globals.css` (@theme), `lib/theme.ts` — use the token, never the hex
 - **Existing components to reuse**: `components/{Sidebar,TopBar,StatusFooter,GlobalTerminal,ClientShell}.tsx`, `app/shield/components/*`, `app/arena/components/*`
 - **Data layer**: `lib/api/{client,shield,arena,types}.ts`, `lib/hooks/*`, `lib/stores/*`
 - **Rules**: `.claude/rules/front/design-system.md`, `.claude/rules/front/lint-typecheck.md`
@@ -108,7 +108,7 @@ A design file shows the ideal state. Ship all of them:
 ## Done means
 
 ```bash
-cd gremlyn-dashboard
+cd dashboard
 npm run typecheck && npm run lint && npx vitest run && npm run build
 ```
 

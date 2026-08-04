@@ -51,7 +51,7 @@ Common friction and the correct fix:
 `dashboard/lib/api/types.ts` **mirrors the Go DTOs exactly** — every field name from its `json` tag, every optionality, every enum value.
 
 - A Go DTO change and this file change **in the same piece of work**. Not "later".
-- When shield's or arena's `internal/api/types.go` moves, run `npm run typecheck` — that's the detector. Type errors here are the *feature*, not an obstacle.
+- When shield's or arena's `internal/<product>/api/types.go` moves, run `npm run typecheck` — that's the detector. Type errors here are the *feature*, not an obstacle.
 - Optionality matters: a Go `*string` / `omitempty` field is `field?: string`, and a Go non-pointer field is required. Getting this wrong produces runtime `undefined` that the compiler was supposed to catch.
 
 ## 5. Structural rules the linter can't see (still blocking)

@@ -37,8 +37,8 @@ You are the Database Engineer for Gremlyn. You own schema design, migration safe
 |---|---|---|
 | Driver | `modernc.org/sqlite` (pure Go, no CGO) | `pgx/v5` |
 | Location | `~/.gremlyn/shield.db`, `~/.gremlyn/arena.db` | `DATABASE_URL` |
-| Migrations | Embedded SQL, auto-applied on startup — `internal/storage/sqlite/migrations.go` | `golang-migrate`, `migrations/NNN_name.{up,down}.sql` |
-| Repos | `internal/storage/sqlite/*_repo.go` | `internal/storage/postgres/*_repo.go` |
+| Migrations | Embedded SQL, auto-applied on startup — `internal/<product>/storage/sqlite/migrations.go` | `golang-migrate`, `migrations/NNN_name.{up,down}.sql` |
+| Repos | `internal/<product>/storage/sqlite/*_repo.go` | `internal/<product>/storage/postgres/*_repo.go` |
 | Placeholders | `?` | `$1, $2` |
 
 **The invariant that governs everything you do: both stores implement the same service-owned interface and must behave identically.** A schema change that lands in one store and not the other is a broken deployment for half the users — and since SQLite is the default, a PostgreSQL-only change is invisible in local testing and explodes in the PG path.

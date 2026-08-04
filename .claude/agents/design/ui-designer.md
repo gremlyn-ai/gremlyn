@@ -27,7 +27,7 @@ The invariants — not preferences:
 - **Material Symbols Outlined** only, no other icon set.
 - **Green `#8eff71` = Shield. Red `#ff7168` = Arena.** Never cross them.
 - Palette: `#000` sidebar, `#0e0e0e` bg, `#131313`→`#262626` elevation, `#adaaaa` muted, `#494847` borders.
-- Use the **token**, never the raw hex, in implementation (`tailwind.config.ts`, `lib/theme.ts`).
+- Use the **token**, never the raw hex, in implementation (`app/globals.css` (@theme), `lib/theme.ts`).
 
 ### Interface Design
 - Layouts that guide the eye to the thing that changed
@@ -89,7 +89,7 @@ Implementation surfaces you're designing into:
 - Shared shell: `components/{Sidebar,TopBar,StatusFooter,GlobalTerminal,ClientShell}.tsx`
 - Shield: `app/shield/components/{MetricCards,ThreatCard,ThreatChart,RuleTable,NewRuleModal}.tsx`
 - Arena: `app/arena/components/{ArenaControls,GremlinSelector,TerminalPanel}.tsx`
-- Tokens: `tailwind.config.ts`, `lib/theme.ts`
+- Tokens: `app/globals.css` (@theme), `lib/theme.ts`
 - Charts: Chart.js — see the `dataviz` skill for chart selection, then constrain the palette to the section accent
 
 Implementation is `frontend-nextjs-developer`'s job. Your output is a spec plus the reference alignment, not the TSX.

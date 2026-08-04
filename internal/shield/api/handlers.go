@@ -479,10 +479,10 @@ func (h *handlers) execShield(ctx context.Context, parts []string) (string, erro
 			state = "RUNNING"
 		}
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("Shield: %s\n", state))
-		sb.WriteString(fmt.Sprintf("Servers: %d\n", len(servers)))
+		_, _ = fmt.Fprintf(&sb, "Shield: %s\n", state)
+		_, _ = fmt.Fprintf(&sb, "Servers: %d\n", len(servers))
 		for _, s := range servers {
-			sb.WriteString(fmt.Sprintf("  - %s\n", s))
+			_, _ = fmt.Fprintf(&sb, "  - %s\n", s)
 		}
 		return strings.TrimRight(sb.String(), "\n"), nil
 
@@ -495,14 +495,14 @@ func (h *handlers) execShield(ctx context.Context, parts []string) (string, erro
 			return "No rules configured.", nil
 		}
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("%-8s %-24s %-16s %-8s\n", "ID", "NAME", "ACTION", "ENABLED"))
+		_, _ = fmt.Fprintf(&sb, "%-8s %-24s %-16s %-8s\n", "ID", "NAME", "ACTION", "ENABLED")
 		sb.WriteString(strings.Repeat("-", 60) + "\n")
 		for _, r := range rules {
 			id := r.ID
 			if len(id) > 8 {
 				id = id[:8]
 			}
-			sb.WriteString(fmt.Sprintf("%-8s %-24s %-16s %-8v\n", id, r.Name, r.Action, r.Enabled))
+			_, _ = fmt.Fprintf(&sb, "%-8s %-24s %-16s %-8v\n", id, r.Name, r.Action, r.Enabled)
 		}
 		return strings.TrimRight(sb.String(), "\n"), nil
 
@@ -525,11 +525,11 @@ func (h *handlers) execShield(ctx context.Context, parts []string) (string, erro
 			return "No events recorded.", nil
 		}
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("%-20s %-16s %-12s %-10s\n", "TIME", "TOOL", "ACTION", "SERVER"))
+		_, _ = fmt.Fprintf(&sb, "%-20s %-16s %-12s %-10s\n", "TIME", "TOOL", "ACTION", "SERVER")
 		sb.WriteString(strings.Repeat("-", 62) + "\n")
 		for _, e := range events {
 			ts := e.Timestamp.Format("15:04:05")
-			sb.WriteString(fmt.Sprintf("%-20s %-16s %-12s %-10s\n", ts, e.ToolName, e.ActionTaken, e.ServerID))
+			_, _ = fmt.Fprintf(&sb, "%-20s %-16s %-12s %-10s\n", ts, e.ToolName, e.ActionTaken, e.ServerID)
 		}
 		return strings.TrimRight(sb.String(), "\n"), nil
 
@@ -583,14 +583,14 @@ func (h *handlers) execArena(ctx context.Context, args []string) (string, error)
 			return "No arena sessions.", nil
 		}
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("%-10s %-12s %-16s\n", "ID", "STATUS", "SERVER"))
+		_, _ = fmt.Fprintf(&sb, "%-10s %-12s %-16s\n", "ID", "STATUS", "SERVER")
 		sb.WriteString(strings.Repeat("-", 40) + "\n")
 		for _, s := range resp.Sessions {
 			id := s.ID
 			if len(id) > 8 {
 				id = id[:8]
 			}
-			sb.WriteString(fmt.Sprintf("%-10s %-12s %-16s\n", id, s.Status, s.Server))
+			_, _ = fmt.Fprintf(&sb, "%-10s %-12s %-16s\n", id, s.Status, s.Server)
 		}
 		return strings.TrimRight(sb.String(), "\n"), nil
 
@@ -613,7 +613,7 @@ func (h *handlers) execArena(ctx context.Context, args []string) (string, error)
 		}
 		var sb strings.Builder
 		for _, g := range resp.Gremlins {
-			sb.WriteString(fmt.Sprintf("  %-16s %s\n", g.Name, g.Description))
+			_, _ = fmt.Fprintf(&sb, "  %-16s %s\n", g.Name, g.Description)
 		}
 		return strings.TrimRight(sb.String(), "\n"), nil
 
@@ -626,7 +626,7 @@ func arenaHTTP(ctx context.Context, url string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -647,21 +647,22 @@ func splitCommand(s string) []string {
 
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
-		if inQuote {
+		switch {
+		case inQuote:
 			if ch == quoteChar {
 				inQuote = false
 			} else {
 				current.WriteByte(ch)
 			}
-		} else if ch == '"' || ch == '\'' {
+		case ch == '"' || ch == '\'':
 			inQuote = true
 			quoteChar = ch
-		} else if ch == ' ' || ch == '\t' {
+		case ch == ' ' || ch == '\t':
 			if current.Len() > 0 {
 				parts = append(parts, current.String())
 				current.Reset()
 			}
-		} else {
+		default:
 			current.WriteByte(ch)
 		}
 	}

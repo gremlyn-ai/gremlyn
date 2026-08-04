@@ -66,9 +66,14 @@ VERDICT: ship | fix-and-ship | block
 - [ ] No hardcoded secrets.
 
 ### core `pkg/` — extra scrutiny
-- [ ] Exported API change flagged explicitly (it breaks two consumers).
+- [ ] The change is verified against **both** `internal/shield` and `internal/arena` in the same commit — root `make check` does this automatically now; confirm it was actually run, and that consumer call sites moved with the API.
+- [ ] Pipeline contract or stage ordering changed → flagged as a **documented breaking change**, with both products' stages re-checked.
 - [ ] JSON-RPC envelope invariants held: `id` preserved on responses, `jsonrpc` intact.
 - [ ] Malformed input does not panic and does not drop the message silently.
+- [ ] stdio framing stayed **newline-delimited JSON** — one object per line, as MCP specifies over stdio. **Not** LSP `Content-Length`; the two are easy to confuse and a `Content-Length` reader parses nothing a real MCP server emits. A framing change is verified against a real MCP server, not only unit tests.
+- [ ] Reads are size-capped (`protocol.MaxLineBytes`, 16 MiB). Peer output is attacker-controlled and this proxy sits inline with the user's agent — an unbounded read is a memory DoS.
+- [ ] Teardown does not drop in-flight responses. Client EOF is a **half-close**, not end-of-session: the server still owes answers to requests already sent.
+- [ ] The **data path** is exercised, not just construction. A test that only builds a `Proxy` and asserts it's non-nil is not coverage — `proxy.WithClientIO` exists for exactly this.
 - [ ] Both transports (wrap + httpproxy) covered by the change and its tests.
 - [ ] Benchmark included if the per-message hot path changed.
 
@@ -108,19 +113,18 @@ VERDICT: ship | fix-and-ship | block
 
 - [ ] Diff < 400 lines (else flag for split — see `workflow.md`).
 - [ ] Conventional Commits on every commit.
-- [ ] **A core `pkg/` change and its consumer updates are separate commits/PRs.**
+- [ ] **A `pkg/` change ships with its `internal/shield` and `internal/arena` updates in the SAME commit** — one module, one atomic change, no version dance.
 - [ ] No commented-out code, no TODO without a reference.
 - [ ] No `_unused` / `// removed` cruft — delete cleanly.
 - [ ] `reference/*.html` untouched.
-- [ ] Committed to the right repo (they are 4 separate git repos).
 
 ## Co-reviewer Routing (recommend at end of report)
 
-- `security-reviewer` — anything in `internal/detection/`, `internal/policy/`, auth middleware, secret handling, SQL, PII.
+- `security-reviewer` — anything in `internal/shield/detection/`, `internal/shield/policy/`, auth middleware, secret handling, SQL, PII.
 - `database-engineer` — new migration, schema change, index, constraint, a query on a growing table.
 - `proxy-engine-developer` — any `pkg/proxy/` or `pkg/protocol/` change.
-- `detection-pipeline-engineer` — `internal/detection/`, `internal/policy/`, `internal/behavioral/`.
-- `chaos-gremlin-designer` — `internal/gremlins/`, `internal/scoring/`, `internal/session/`.
+- `detection-pipeline-engineer` — `internal/shield/detection/`, `internal/shield/policy/`, `internal/shield/behavioral/`.
+- `chaos-gremlin-designer` — `internal/arena/gremlins/`, `internal/arena/scoring/`, `internal/arena/session/`.
 - `mcp-domain-expert` — behavior/semantics questions: what an action should do, what counts as resilient.
 - `frontend-architect` — route layout change, store added, WebSocket architecture, shared component promotion.
 - `release-infrastructure` — `Makefile`, `Dockerfile`, CI, `.golangci.yml`, release scripts.
@@ -128,7 +132,7 @@ VERDICT: ship | fix-and-ship | block
 
 ## Procedure
 
-1. Run `git diff <base>...HEAD` (or read the uncommitted diff) — **in each affected repo**, they're separate.
+1. Run `git diff <base>...HEAD` (or read the uncommitted diff) — **one repo, one diff**: it already spans `pkg/`, both products, the CLI and the dashboard.
 2. For each touched file, walk the relevant checklist.
 3. Use Grep/Read to verify a suspicion **before** flagging it.
 4. Cluster findings by file, sort by severity within each file.

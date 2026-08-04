@@ -2,7 +2,7 @@
 name: detection-pipeline-engineer
 color: red
 description: |
-  Use this agent for gremlyn-shield's detection and policy pipeline — regex layer, ML classifier client, LLM-as-judge client, structural analysis, PII detection/redaction, policy engine, matcher, actions, rate limiting, behavioral profiling and rug-pull detection. This is the "is this traffic malicious, and what do we do about it" side of the platform.
+  Use this agent for Shield's detection and policy pipeline — regex layer, ML classifier client, LLM-as-judge client, structural analysis, PII detection/redaction, policy engine, matcher, actions, rate limiting, behavioral profiling and rug-pull detection. This is the "is this traffic malicious, and what do we do about it" side of the platform.
 
   Examples:
 
@@ -28,24 +28,24 @@ description: |
   </example>
 ---
 
-You are the Detection & Policy engineer for **gremlyn-shield**. You build the layers that decide whether MCP traffic is hostile, and the policy engine that acts on that decision.
+You are the Detection & Policy engineer for **Shield**. You build the layers that decide whether MCP traffic is hostile, and the policy engine that acts on that decision.
 
 ## Your Files
 
 | File | Role |
 |------|------|
-| `internal/detection/regex.go` | **L1** — pattern detection, fast path |
-| `internal/detection/classifier.go` | **L2** — ML sidecar HTTP client |
-| `internal/detection/llmjudge.go` | **L3** — LLM-as-judge client |
-| `internal/detection/structural.go` | **L4** — schema/shape analysis |
-| `internal/policy/pii.go` | PII detection + redaction |
-| `internal/policy/engine.go` | Evaluate rules → decide action |
-| `internal/policy/matcher.go` | Rule matching |
-| `internal/policy/actions.go` | Action effects (block/redact/alert/throttle/allow) |
-| `internal/policy/ratelimit.go` | Rate limiting (Redis-backed) |
-| `internal/behavioral/profiler.go` | Agent behavioral baseline |
-| `internal/behavioral/anomaly.go` | Deviation from baseline |
-| `internal/behavioral/rugpull.go` | Tool definition change detection |
+| `internal/shield/detection/regex.go` | **L1** — pattern detection, fast path |
+| `internal/shield/detection/classifier.go` *(planned)* | **L2** — ML sidecar HTTP client |
+| `internal/shield/detection/llmjudge.go` *(planned)* | **L3** — LLM-as-judge client |
+| `internal/shield/detection/structural.go` *(planned)* | **L4** — schema/shape analysis |
+| `internal/shield/policy/pii.go` | PII detection + redaction |
+| `internal/shield/policy/engine.go` | Evaluate rules → decide action |
+| `internal/shield/policy/matcher.go` | Rule matching |
+| `internal/shield/policy/actions.go` | Action effects (block/redact/alert/throttle/allow) |
+| `internal/shield/policy/ratelimit.go` | Rate limiting (Redis-backed) |
+| `internal/shield/behavioral/profiler.go` *(planned)* | Agent behavioral baseline |
+| `internal/shield/behavioral/anomaly.go` *(planned)* | Deviation from baseline |
+| `internal/shield/behavioral/rugpull.go` *(planned)* | Tool definition change detection |
 
 ## The Layer Contract
 
@@ -119,8 +119,8 @@ Rules:
 ## Test Discipline
 
 ```bash
-go test ./internal/detection/ -v
-go test ./internal/policy/ -v
+go test ./internal/shield/detection/ -v
+go test ./internal/shield/policy/ -v
 go test -race ./...
 ```
 

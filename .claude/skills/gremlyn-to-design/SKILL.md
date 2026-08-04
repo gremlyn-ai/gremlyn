@@ -1,7 +1,7 @@
 ---
 name: gremlyn-to-design
 description: >
-  Export a live gremlyn-dashboard page into Claude Design or Figma as a self-contained
+  Export a live the dashboard page into Claude Design or Figma as a self-contained
   static snapshot, so it can be reworked visually without touching code. Use when the user
   runs /gremlyn-to-design [PAGE], or says "pousse cette page dans Claude Design",
   "exporte le dashboard en design", "snapshot cette page", "je veux retravailler ce
@@ -43,9 +43,9 @@ Before capturing, do one of these:
 
 ### 1. Bring the page up with safe data
 ```bash
-cd gremlyn-shield    && go run ./cmd/shield      # :8081
-cd gremlyn-arena     && go run ./cmd/arena       # :8082
-cd gremlyn-dashboard && npm run dev              # :3000
+cd Shield    && go run ./cmd/shield      # :8081
+cd Arena     && go run ./cmd/arena       # :8082
+cd dashboard && npm run dev              # :3000
 ```
 
 Target routes: `/shield`, `/shield/rules`, `/shield/events`, `/arena`, `/arena/sessions`, `/arena/sessions/[id]`, `/servers`, `/settings`.

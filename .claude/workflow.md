@@ -1,6 +1,6 @@
 # Gremlyn Development Workflow
 
-> Standard execution pipeline for any feature, bug, or non-trivial change across the four Gremlyn repos (`gremlyn-core`, `gremlyn-shield`, `gremlyn-arena`, `gremlyn-dashboard`).
+> Standard execution pipeline for any feature, bug, or non-trivial change in the Gremlyn repo — the single Go module `github.com/gremlyn-ai/gremlyn` plus the `dashboard/` frontend.
 >
 > Each step routes automatically to the right specialist agent. Agents live in [`.claude/agents/`](agents/).
 
@@ -26,21 +26,16 @@ Mandatory pause between each step — an agent never triggers the next one witho
 
 ---
 
-## ⚠️ The multi-repo rule that governs everything
+## ⚠️ The single-module rule that governs everything
 
-The four repos are **independent git repositories**. There is no monorepo, no atomic cross-repo commit.
-
-`gremlyn-shield` and `gremlyn-arena` import `github.com/gremlyn-ai/gremlyn/pkg/...` (local dev via a `replace` directive in `go.mod`).
+Gremlyn is **one git repository, one Go module**: `github.com/gremlyn-ai/gremlyn`. `internal/shield/` and `internal/arena/` import `github.com/gremlyn-ai/gremlyn/pkg/...` directly. No `replace` directive, no version chain, no cross-repo tagging, no "which repo am I in".
 
 **Therefore:**
 
-- A change touching **`pkg/`** is **always at least two tickets**: core first, then each consumer. It cannot be one PR.
-- The version order is fixed and non-negotiable:
-  1. change + test + tag **`gremlyn-core`**
-  2. `go get github.com/gremlyn-ai/gremlyn-core@vX.Y.Z` in **each** consumer, build, test
-  3. tag the consumers
-- After any core change, `make check` runs in **all three** Go repos. Core passing its own tests proves nothing about its consumers.
-- Always state **which repo** a command runs in. Wrong working directory is the most common mistake in this project.
+- A change touching **`pkg/`** and its consumers is **one atomic commit, one PR**. Never split it along the old module boundary.
+- `pkg/` is still shared code: a `pkg/proxy` or `pkg/protocol` change ripples into Shield, Arena **and** the CLI. Both consumers must be verified **in that same commit** — a `pkg/` change whose consumers weren't rebuilt is not done.
+- `make check` at the repo root covers that automatically: it is `go vet` + `golangci-lint` + `go test -race` over `./...`, so the consumers cannot silently rot. `make dashboard-check` is the frontend gate.
+- One gate run, one commit, one version. The only thing still manual is the end-to-end product check against a real MCP server.
 
 ---
 
@@ -56,7 +51,7 @@ The four repos are **independent git repositories**. There is no monorepo, no at
 
 **Procedure**:
 1. PM clarifies problem, scope, acceptance criteria.
-2. PM identifies impacted repos and packages. **A `pkg/` change in core is flagged loudly.**
+2. PM identifies impacted areas and packages. **A `pkg/` change is flagged loudly** — it lands with both consumers in the same commit.
 3. PM proposes the **routing** (which agents own each next step).
 4. PM lists risks / open questions.
 
@@ -64,8 +59,7 @@ The four repos are **independent git repositories**. There is no monorepo, no at
 
 **Rules**:
 - No code written at this step.
-- If > 400 LOC of expected diff, the ticket MUST be split.
-- If the change spans core + a service, it MUST be split.
+- If > 400 LOC of expected diff, the ticket MUST be split. That is the **only** reason to split — never because the change spans `pkg/` and a service.
 - If a critical open question remains, **PAUSE**, ask the user.
 
 > ⏸ **PAUSE**: validate the ticket with the user before Step 2.
@@ -92,7 +86,7 @@ The four repos are **independent git repositories**. There is no monorepo, no at
 | Schema, indexes, retention, risky migrations | `database-engineer` |
 | Dashboard structure, routes, stores, WebSocket architecture | `frontend-architect` |
 | LLM-as-judge, ML sidecar, MCP protocol depth | `ai-engineer` |
-| Build, release, CI, cross-repo versioning | `release-infrastructure` |
+| Build, release, CI, module versioning | `release-infrastructure` |
 | Behavior / semantics ("what should this DO") | `mcp-domain-expert` |
 
 **Deliverable**: an architecture brief (signatures, file layout, migration plan — no full code).
@@ -109,8 +103,8 @@ The four repos are **independent git repositories**. There is no monorepo, no at
 |-------|-------|
 | `pkg/proxy/`, `pkg/protocol/` — the hot path | `proxy-engine-developer` |
 | General Go: handlers, services, repos, CLI, config, migrations | `go-backend-developer` |
-| `shield/internal/{detection,policy,behavioral}/` | `detection-pipeline-engineer` |
-| `arena/internal/{gremlins,scoring,session}/` | `chaos-gremlin-designer` |
+| `internal/shield/{detection,policy,alert}/` | `detection-pipeline-engineer` |
+| `internal/arena/{gremlins,scoring,session}/` | `chaos-gremlin-designer` |
 | Dashboard components, pages, stores, API client | `frontend-nextjs-developer` |
 | Risky migration / schema work | `database-engineer` |
 | Makefile, Dockerfile, CI, `.golangci.yml`, release | `release-infrastructure` |
@@ -122,9 +116,9 @@ The four repos are **independent git repositories**. There is no monorepo, no at
 **Rules**:
 - **Tests written alongside**, not after. See `qa-engineer` for the patterns.
 - Before marking done:
-  - Go: `make check` green (= `go vet` + `golangci-lint` + `go test -race`) in **every** repo touched.
-  - Dashboard: `npm run typecheck` + `npm run lint` + `npx vitest run` + **`npm run build`** all clean.
-- Conventional Commits on every commit, **per repo**.
+  - Go: `make check` green at the repo root — once, not per area (= `go vet` + `golangci-lint` + `go test -race ./...`).
+  - Dashboard: `make dashboard-check` — `npm run typecheck` + `npm run lint` + `npx vitest run` + **`npm run build`** all clean.
+- Conventional Commits on every commit.
 - Target diff < 400 lines (otherwise split — refuse and escalate to PM).
 - **No CGO.** `CGO_ENABLED=0` must keep working.
 - No hardcoded secrets. No dependency outside Apache-2.0 / MIT / BSD without explicit user validation.
@@ -132,7 +126,7 @@ The four repos are **independent git repositories**. There is no monorepo, no at
 - A detection change ships **negative** corpus cases, not only positives.
 - A schema change lands in **both** SQLite and PostgreSQL.
 
-**Deliverable**: code + tests on branch `feat/<slug>` or `fix/<slug>`, **in each affected repo**.
+**Deliverable**: code + tests on branch `feat/<slug>` or `fix/<slug>` — one branch, covering every area the ticket touches.
 
 ---
 
@@ -143,10 +137,10 @@ The four repos are **independent git repositories**. There is no monorepo, no at
 **Co-reviewers** (triggered by what the diff touches):
 | If the diff touches… | Co-reviewer |
 |------------------------|-------------|
-| `internal/detection/`, `internal/policy/`, auth, SQL, PII, secrets | `security-reviewer` |
+| `internal/shield/{detection,policy}/`, auth, SQL, PII, secrets | `security-reviewer` |
 | `pkg/proxy/`, `pkg/protocol/` | `proxy-engine-developer` |
-| `internal/{detection,policy,behavioral}/` | `detection-pipeline-engineer` |
-| `internal/{gremlins,scoring,session}/` | `chaos-gremlin-designer` |
+| `internal/shield/{detection,policy,alert}/` | `detection-pipeline-engineer` |
+| `internal/arena/{gremlins,scoring,session}/` | `chaos-gremlin-designer` |
 | Migration, schema, index, a query on a growing table | `database-engineer` |
 | Route layout, store, WebSocket architecture, shared component | `frontend-architect` |
 | Behavior/semantics questions raised in review | `mcp-domain-expert` |
@@ -187,11 +181,11 @@ The four repos are **independent git repositories**. There is no monorepo, no at
 1. Verify the tests written in Step 3 cover the ticket's acceptance criteria.
 2. Fill gaps (Go table-driven, Vitest, integration).
 3. Run the suites:
-   - Go, per repo: `go test -race ./...` — and `-count=2` when hunting a flake.
-   - Integration where relevant: `docker compose up -d postgres redis && go test -tags=integration ./...`
-   - Dashboard: `npm run typecheck && npm run lint && npx vitest run && npm run build`
+   - Go: `make check` at the repo root — one run covers `pkg/`, both services and the CLI. `go test -race ./... -count=2` when hunting a flake.
+   - Integration where relevant: `docker compose up -d postgres redis && make integration`
+   - Dashboard: `make dashboard-check`
 4. **End-to-end against a real MCP server** whenever the proxy path changed:
-   `./gremlyn wrap -- npx @modelcontextprotocol/server-memory` → exercise `initialize`, `tools/list`, `tools/call`.
+   `./bin/gremlyn wrap -- npx -y @modelcontextprotocol/server-memory` → exercise `initialize`, `tools/list`, `tools/call`.
 5. Failure → back to Step 4bis with the relevant dev.
 
 **Deliverable**: green suites + the **manual validation checklist** (template in [`agents/qa-engineer.md`](agents/qa-engineer.md)) handed to the user.
@@ -225,13 +219,13 @@ The four repos are **independent git repositories**. There is no monorepo, no at
 
 **Procedure**:
 1. Read the final diff + the original ticket.
-2. Update the right `<repo>/docs/<Area>/` page.
-3. Create the changelog entry in `.changelogs/<YYYY-MM-DD>-<slug>.md`. **A core `pkg/` API change is always marked `breaking`** and names the consumer versions needing a bump.
-4. If a convention changed → update the owning `<repo>/CLAUDE.md` **and** the matching `.claude/rules/` file (they must not disagree). Keep each CLAUDE.md under ~150 lines.
+2. Update the right `docs/` page — `core.md`, `shield.md`, `arena.md` or `dashboard.md`.
+3. Create the changelog entry in `.changelogs/<YYYY-MM-DD>-<slug>.md`. A `pkg/` API change is marked `breaking` **only if user-visible behavior changed** — there is no version chain to write out, the consumers moved in the same commit.
+4. If a convention changed → update the root `CLAUDE.md` **and** the matching `.claude/rules/` file (they must not disagree). Keep `CLAUDE.md` under ~150 lines.
 5. Add godoc for any new exported Go symbol.
-6. Verify links resolve — cross-repo links must name the repo, since each is cloned independently.
+6. Verify links resolve — every link is repo-relative now.
 
-**Deliverable**: docs commits, per repo.
+**Deliverable**: the docs commit.
 
 ---
 
@@ -241,7 +235,7 @@ Format the PM provides at the end of the ticket:
 
 ```
 Routing summary:
-- Repos: <core / shield / arena / dashboard>
+- Areas: <pkg / shield / arena / dashboard / migrations / infra>
 - Reflection: product-manager [+ mcp-domain-expert]
 - Architecture: <agent or "skip">
 - Development: <main dev agent> [+ co-devs]
@@ -289,8 +283,6 @@ Routing summary:
 ## Anti-patterns to refuse
 
 - 🚫 Skipping Step 1 ("just code it").
-- 🚫 **A core `pkg/` change and its consumer updates in one ticket.**
-- 🚫 **Tagging a consumer before core.**
 - 🚫 Diff > 400 LOC without a split.
 - 🚫 Tests written after the code.
 - 🚫 Running bare `go test` instead of `-race`.
@@ -309,14 +301,13 @@ Routing summary:
 
 ## Special cases
 
-### Core `pkg/` change (the most common trap)
-- Step 1: PM splits into **N+1 tickets** — one for core, one per consumer.
+### Core `pkg/` change (still the highest-blast-radius change)
+- Step 1: **one ticket**, naming `pkg/` *and* every consumer call site it moves (`internal/shield/`, `internal/arena/`, `internal/cli/`). Split only if > 400 LOC.
 - Step 2: `proxy-engine-developer` writes the contract brief. Ordering of pipeline stages and exported signatures are stated explicitly.
-- Step 3: core only. Tests + benchmark. Tag.
-- Step 3b: each consumer — `go get …@vX.Y.Z`, build, test, tag.
-- Step 4: `code-reviewer` + `proxy-engine-developer` on core; then per consumer.
-- Step 5: `make check` in all three repos + e2e against a real MCP server.
-- Step 7: changelog marked `breaking`, with the version chain written out.
+- Step 3: `pkg/` change **and** both consumers migrated in the **same commit**. Tests + benchmark. A commit that compiles `pkg/` but leaves a consumer broken never exists.
+- Step 4: `code-reviewer` + `proxy-engine-developer` over the whole diff, consumers included.
+- Step 5: `make check` at the root (this is what proves both consumers still build and pass) + e2e: `./bin/gremlyn wrap -- npx -y @modelcontextprotocol/server-memory`.
+- Step 7: changelog names the behavior change for Shield and Arena. `breaking` only if the user sees it.
 
 ### Detection change (new rule / pattern / layer)
 - Step 1: short ticket, AC includes **a false-positive budget**, not just "catches X".
@@ -354,6 +345,6 @@ Routing summary:
 - Step 7: only if a convention changed.
 
 ### Release
-- Step 3: `release-infrastructure` — version chain, cross-compile matrix, checksums.
-- Step 5: clean-clone build (no `replace`), `CGO_ENABLED=0` verified, `gremlyn version` reports correctly, zero-config path works with no compose services running.
+- Step 3: `release-infrastructure` — one tag for the whole module, cross-compile matrix, checksums for all three binaries.
+- Step 5: clean-clone `make build`, `CGO_ENABLED=0` verified, `gremlyn version` reports the tag correctly, zero-config path works with no compose services running.
 - Step 7: release notes; flag any migration that will stall user startup.

@@ -1,26 +1,23 @@
 # Generate Weekly Changelog
 
-Generate the weekly changelog based on commits since the last one, across all four Gremlyn repos.
+Generate the weekly changelog based on commits since the last one.
 
 ## Instructions
 
 1. List files in `.changelogs/` to find the most recent **weekly** changelog — the latest pure `YYYY-MM-DD.md` (ignore feature-suffixed ones like `2026-08-01-rugpull.md`). That date is the period START.
 2. Get today's date for the period END.
-3. Collect commits **from all four repos** (see below).
+3. Collect the commits (see below).
 4. Read `.changelogs/INSTRUCTIONS.md` if it exists for any project-specific formatting.
 
-## Collecting commits — four repos, no monorepo ⚠️
+## Collecting commits — one repo, one log
 
-This is the part people get wrong. There is no single `git log` that covers this project.
+Gremlyn is a single git repository, so one `git log` covers the whole project.
 
 ```bash
 mkdir -p /tmp/gremlyn-changelog
-for d in gremlyn-core gremlyn-shield gremlyn-arena gremlyn-dashboard; do
-  git -C "$d" log --since="<start> 00:00" --no-merges \
-    --pretty="$d|%h|%ad|%s" --date=short \
-    >> /tmp/gremlyn-changelog/all_commits.txt 2>/dev/null
-done
-sort -t'|' -k3 /tmp/gremlyn-changelog/all_commits.txt
+git log --since="<start> 00:00" --no-merges \
+  --pretty="%h|%ad|%s" --date=short --reverse \
+  > /tmp/gremlyn-changelog/all_commits.txt
 wc -l < /tmp/gremlyn-changelog/all_commits.txt   # true commit count
 ```
 
@@ -28,28 +25,28 @@ Then **read that file with the Read tool**, not `cat`/`grep`, so nothing gets tr
 
 ### Two gotchas
 
-1. **A date is not a git ref.** `2026-08-01..HEAD` fails — `2026-08-01` is not a revision. Use `--since`. Do **not** add `--until`; it can clip same-day commits.
-2. **One logical change appears as N commits across N repos.** A core `pkg/` change plus its two consumer bumps is *one* feature and three commits. Group by feature in the changelog, not by repo — but name the repos, because "which repo" is the information a reader actually needs.
+1. **A date is not a git ref.** `2026-08-01..HEAD` fails — `2026-08-01` is not a revision. Use `--since`.
+2. **Never add `--until`.** It clips same-day commits, so the most recent work silently disappears from the changelog.
 
-### Coverage check
+### Mapping commits to sections
+
+The sections below are **areas**, and areas are directories. Get them from the log:
 ```bash
-for d in gremlyn-core gremlyn-shield gremlyn-arena gremlyn-dashboard; do
-  echo -n "$d: "; git -C "$d" log --since="<start> 00:00" --no-merges --oneline | wc -l
-done
+git log --since="<start> 00:00" --no-merges --name-only --pretty=format:'%h|%s'
 ```
-A changelog missing a repo is wrong — re-collect.
+`pkg/`, `cmd/`, `internal/cli/` → Core · `internal/shield/` → Shield · `internal/arena/` → Arena · `dashboard/` → Dashboard · `migrations/` + `internal/*/storage/` → Migrations · `Makefile`, `.golangci.yml`, CI → Infrastructure · `docs/` → Documentation.
 
 ## Also detect
 
-- **New tags** (a release happened): `for d in …; do git -C "$d" tag --sort=-creatordate | head -3; done`
-- **New research**: `git -C <repo> log --since="<start>" --name-only --pretty=format: -- docs/Research/ | sort -u`
-- **Migrations added**: any new file under `migrations/` or a new entry in `internal/storage/sqlite/migrations.go`
+- **New tags** (a release happened): `git tag --sort=-creatordate | head -3` — one tag now covers the whole module
+- **New research**: `git log --since="<start>" --name-only --pretty=format: -- docs/ | sort -u`
+- **Migrations added**: any new file under `migrations/{shield,arena}/` or under `internal/{shield,arena}/storage/sqlite/migrations/`
 
 ## Changelog Structure
 
-- **Intro** — total commit count, per-repo breakdown, the week's headline threads
-- **⚠️ Breaking changes** — first section if any exist. Every `pkg/` API change goes here with the version chain (`core v0.4.0 → shield v0.3.1, arena v0.3.1`). A score-weight change goes here too, because it breaks historical comparability
-- **Releases** — any tags cut, per repo
+- **Intro** — total commit count, per-area breakdown, the week's headline threads
+- **⚠️ Breaking changes** — first section if any exist. What a **user** sees breaking: a config key, a CLI flag, an API response shape, a migration. A score-weight change goes here too, because it breaks historical comparability. A `pkg/` refactor whose consumers moved in the same commit is *not* a breaking change
+- **Releases** — the tag cut, if any (one tag, whole module)
 - **Shield** — detection, policy, behavioral, alerting. Note any **false-positive impact** — that's the user-visible one
 - **Arena** — gremlins, sessions, scoring. Note any **scoring change** and whether old scores stay comparable
 - **Core** — proxy, protocol, pipeline, CLI, config
@@ -57,7 +54,7 @@ A changelog missing a repo is wrong — re-collect.
 - **Infrastructure & Performance** — build, CI, release, perf work (with the before/after numbers)
 - **Migrations** — schema changes, both stores, and whether a user's local DB migrates automatically on next launch
 - **Documentation** — new or updated docs, new research
-- **Stats footer** — commit count per repo, focus areas, milestones
+- **Stats footer** — commit count per area, focus areas, milestones
 
 ## Output
 

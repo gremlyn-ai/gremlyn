@@ -28,7 +28,7 @@ You are the QA Engineer for Gremlyn. You ensure every shipped feature is covered
 ### Go (core / shield / arena)
 ```bash
 go test ./...                              # all
-go test ./internal/policy/ -v              # one package
+go test ./internal/shield/policy/ -v              # one package
 go test -race ./... -count=2               # races + flake detection
 go test -tags=integration ./...            # integration (build-tagged)
 go test -bench=. -benchmem ./pkg/proxy/    # benchmarks
@@ -55,14 +55,14 @@ npx vitest run --coverage
 ### End-to-end (the real thing)
 The only test that proves the product works is a real MCP server behind the proxy:
 ```bash
-cd gremlyn-core && go build -o gremlyn ./cmd/gremlyn
+cd the core packages && go build -o gremlyn ./cmd/gremlyn
 ./gremlyn wrap -- npx @modelcontextprotocol/server-memory
 ```
 Full local stack, 3 terminals:
 ```bash
-cd gremlyn-shield    && go run ./cmd/shield      # :8081
-cd gremlyn-arena     && go run ./cmd/arena       # :8082
-cd gremlyn-dashboard && npm run dev              # :3000
+cd Shield    && go run ./cmd/shield      # :8081
+cd Arena     && go run ./cmd/arena       # :8082
+cd dashboard && npm run dev              # :3000
 ```
 
 ## Test Pyramid (target ratios)

@@ -2,7 +2,7 @@
 paths:
   - "dashboard/**/*.tsx"
   - "dashboard/**/*.css"
-  - "dashboard/tailwind.config.ts"
+  - "dashboard/app/globals.css"
   - "dashboard/lib/theme.ts"
 ---
 
@@ -20,7 +20,7 @@ Always-on visual contract for the dashboard. Full spec: `docs/dashboard.md`.
 - **Dark mode ONLY.** No light mode, no `dark:` variants, no theme toggle. Ever.
 - **`border-radius: 0` everywhere.** Sharp edges. The only exception is a pill (`rounded-full` / `9999px`).
 - **Green `#8eff71` = Shield. Red `#ff7168` = Arena.** Never cross an accent into the other section. A green primary button on an Arena page is a bug.
-- **Use the token, never the raw hex**, in every component. Tokens live in `tailwind.config.ts` and `lib/theme.ts`.
+- **Use the token, never the raw hex**, in every component. Tokens live in `app/globals.css` (@theme) and `lib/theme.ts`.
 - **Tailwind utilities only.** The *only* permitted custom CSS is the scanline overlay and the range-slider thumb, in `globals.css`. No CSS modules, no styled-components, no inline `style` for anything Tailwind can express.
 - **Material Symbols Outlined exclusively** for icons: `<span className="material-symbols-outlined">bolt</span>`. No lucide, no heroicons, no SVG icon packs.
 

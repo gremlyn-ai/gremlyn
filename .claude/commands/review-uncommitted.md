@@ -6,7 +6,7 @@ Review all uncommitted files (staged and unstaged) before committing.
 
 1. Determine **which repo(s)** have changes — Gremlyn is four independent git repositories:
    ```bash
-   for d in gremlyn-core gremlyn-shield gremlyn-arena gremlyn-dashboard; do
+   for d in the core packages Shield Arena the dashboard; do
      echo "=== $d"; git -C "$d" status --short
    done
    ```
@@ -42,7 +42,7 @@ Review all uncommitted files (staged and unstaged) before committing.
 - Missing `ctx context.Context` as the first param of an IO function; `context.TODO()` shipped
 - A goroutine with no exit path on ctx cancel
 - `io.ReadAll` on a network body with no size cap → memory DoS on an inline proxy
-- A bare `//nolint` with no reason, or any `//nolint` in `internal/detection/` or `internal/policy/`
+- A bare `//nolint` with no reason, or any `//nolint` in `internal/shield/detection/` or `internal/shield/policy/`
 - New CGO dependency → breaks `CGO_ENABLED=0` static builds
 
 ### High
@@ -97,9 +97,9 @@ Review all uncommitted files (staged and unstaged) before committing.
 Group by repo, then by file:
 
 ```
-# gremlyn-shield
+# Shield
 
-## internal/detection/regex.go
+## internal/shield/detection/regex.go
 
 ### Critical (must fix)
 - Line 42: unbounded `.*` in the injection pattern — ReDoS on attacker input

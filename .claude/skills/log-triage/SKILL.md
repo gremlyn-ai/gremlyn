@@ -21,8 +21,8 @@ Gremlyn is **local-first** — there is no Sentry, no APM, no hosted error strea
 zerolog writes structured JSON. Capture it rather than reading it fly-by:
 
 ```bash
-cd gremlyn-shield && go run ./cmd/shield 2>&1 | tee /tmp/shield.log
-cd gremlyn-arena  && go run ./cmd/arena  2>&1 | tee /tmp/arena.log
+cd Shield && go run ./cmd/shield 2>&1 | tee /tmp/shield.log
+cd Arena  && go run ./cmd/arena  2>&1 | tee /tmp/arena.log
 ```
 
 Raise the level if the interesting lines aren't there (debug level is where the proxy detail lives).

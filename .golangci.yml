@@ -1,41 +1,59 @@
+version: "2"
+
 linters:
   enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - gofmt
-    - goimports
-    - misspell
-    - unconvert
+    - bodyclose # HTTP response bodies must be closed
+    - errorlint # correct use of %w and errors.Is/As
+    - exhaustive # every case of an enum switch is handled
     - gocritic
+    - misspell
+    - noctx # no HTTP/SQL call without a context
+    - prealloc # suggests slice pre-allocation
     - revive
-    - noctx          # détecte les appels HTTP sans context.Context
-    - bodyclose      # détecte les body HTTP non fermés
-    - exhaustive     # force tous les cas dans un switch sur enum
-    - errorlint      # vérifie le bon usage de %w et errors.Is/As
-    - prealloc       # suggère les pré-allocations de slices
+    - unconvert
 
-linters-settings:
-  revive:
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - checkPrivateReceivers
+        - name: unexported-return
+
+  exclusions:
+    generated: lax
+    paths:
+      # The dashboard is a Next.js app; node_modules vendors third-party Go
+      # sources (e.g. flatted) that are not ours to lint.
+      - dashboard
+      - third_party$
+      - builtin$
+      - examples$
     rules:
-      - name: exported
-        arguments:
-          - "checkPrivateReceivers"
-      - name: unexported-return
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-  exhaustive:
-    default-signifies-exhaustive: true
+      # httptest.NewRequest is the idiomatic way to build a request in a handler
+      # test and it takes no context. Requiring one there is pure noise.
+      - path: _test\.go
+        linters:
+          - noctx
 
 issues:
-  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
 
-run:
-  timeout: 5m
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - dashboard
+      - third_party$
+      - builtin$
+      - examples$

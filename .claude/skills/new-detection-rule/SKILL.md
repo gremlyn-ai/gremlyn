@@ -1,6 +1,6 @@
 ---
 name: new-detection-rule
-description: Add or change a detection pattern / policy rule in gremlyn-shield — with the mandatory positive AND negative corpus, the fail-open check, the precision/recall report, and the false-positive budget. Use when the user says "new detection rule", "add a pattern", "detect X", "block Y", or runs /new-detection-rule.
+description: Add or change a detection pattern / policy rule in Shield — with the mandatory positive AND negative corpus, the fail-open check, the precision/recall report, and the false-positive budget. Use when the user says "new detection rule", "add a pattern", "detect X", "block Y", or runs /new-detection-rule.
 ---
 
 # New Detection Rule
@@ -30,14 +30,14 @@ Before writing a pattern:
 ## Files to touch
 
 ```
-internal/detection/regex.go        → L1 patterns
-internal/detection/structural.go   → L4 shape analysis
-internal/detection/classifier.go   → L2 sidecar client (contract only)
-internal/policy/pii.go             → PII patterns + redaction
-internal/policy/matcher.go         → rule matching, if the matching shape changed
-internal/policy/actions.go         → only if a new action type (rare)
-internal/detection/regex_test.go   → THE CORPUS — positives and negatives
-internal/policy/scenarios_test.go  → end-to-end rule → action behavior
+internal/shield/detection/regex.go        → L1 patterns
+internal/shield/detection/structural.go   → L4 shape analysis
+internal/shield/detection/classifier.go   → L2 sidecar client (contract only)
+internal/shield/policy/pii.go             → PII patterns + redaction
+internal/shield/policy/matcher.go         → rule matching, if the matching shape changed
+internal/shield/policy/actions.go         → only if a new action type (rare)
+internal/shield/detection/regex_test.go   → THE CORPUS — positives and negatives
+internal/shield/policy/scenarios_test.go  → end-to-end rule → action behavior
 ```
 
 ## The corpus — the actual work
@@ -137,8 +137,8 @@ An untested fallback is a fail-open in waiting. Test each one and assert the fal
 ## Measure before and after
 
 ```bash
-go test ./internal/detection/ -v -run TestCorpus
-go test -bench=. -benchmem ./internal/detection/
+go test ./internal/shield/detection/ -v -run TestCorpus
+go test -bench=. -benchmem ./internal/shield/detection/
 ```
 
 Report both numbers, always together:
@@ -154,7 +154,7 @@ Report both numbers, always together:
 ## Done means
 
 ```bash
-go test -race ./internal/detection/ ./internal/policy/ -v
+go test -race ./internal/shield/detection/ ./internal/shield/policy/ -v
 make check
 ```
 

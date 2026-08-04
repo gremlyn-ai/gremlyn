@@ -17,9 +17,9 @@ Pairs with `.claude/rules/go/layering.md` (§9) and each repo's CLAUDE.md "Testi
 Next to the code, never in a parallel tree:
 
 ```
-internal/policy/engine.go        → engine_test.go
-internal/policy/matcher.go       → matcher_test.go
-internal/policy/scenarios_test.go   # cross-component behavior for the package
+internal/shield/policy/engine.go        → engine_test.go
+internal/shield/policy/matcher.go       → matcher_test.go
+internal/shield/policy/scenarios_test.go   # cross-component behavior for the package
 pkg/proxy/jsonrpc.go             → jsonrpc_test.go
 ```
 

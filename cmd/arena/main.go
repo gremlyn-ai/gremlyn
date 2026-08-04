@@ -29,6 +29,8 @@ func main() {
 }
 
 func run(logger zerolog.Logger) error {
+	ctx := context.Background()
+
 	// Build gremlin registry with all 8 gremlins.
 	registry := gremlins.NewRegistry()
 	registry.Register(gremlins.NewHallucinationGremlin("delete_all_data", 0.3))
@@ -49,7 +51,6 @@ func run(logger zerolog.Logger) error {
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL != "" {
-		ctx := context.Background()
 		db, err := postgres.New(ctx, dbURL, logger)
 		if err != nil {
 			return fmt.Errorf("connecting to postgres: %w", err)
@@ -62,7 +63,7 @@ func run(logger zerolog.Logger) error {
 		if err != nil {
 			return fmt.Errorf("resolving data dir: %w", err)
 		}
-		db, err := sqlitestore.New(dbPath, logger)
+		db, err := sqlitestore.New(ctx, dbPath, logger)
 		if err != nil {
 			return fmt.Errorf("opening sqlite: %w", err)
 		}
@@ -113,10 +114,10 @@ func run(logger zerolog.Logger) error {
 	<-done
 	logger.Info().Msg("shutting down arena")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("server shutdown: %w", err)
 	}
 

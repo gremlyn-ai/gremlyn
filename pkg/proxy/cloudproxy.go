@@ -64,6 +64,11 @@ type authTransport struct {
 	logger     zerolog.Logger
 }
 
+// RoundTrip implements http.RoundTripper. It sends a clone of req with the
+// configured auth header and custom headers applied, leaving the caller's
+// request untouched. A raw (non-Bearer, non-Basic) auth value is sent as a
+// Bearer token. It is safe for concurrent use as long as the configured headers
+// are not mutated after construction.
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Clone the request to avoid mutating the original.
 	clone := req.Clone(req.Context())

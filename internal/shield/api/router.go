@@ -24,7 +24,13 @@ func NewRouter(shield *service.Shield, logger zerolog.Logger) *chi.Mux {
 		MaxAge:           300,
 	}))
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// Deliberately NOT middleware.RealIP. It rewrites r.RemoteAddr from
+	// X-Forwarded-For / X-Real-IP / True-Client-IP, which are client-controlled
+	// unless a trusted reverse proxy sets them. Gremlyn is local-first and runs
+	// with nothing in front of it, so trusting those headers would let a caller
+	// forge its own source address in our audit trail — in a security product
+	// that is strictly worse than reporting the real socket address.
+	// See GHSA-3fxj-6jh8-hvhx, GHSA-rjr7-jggh-pgcp, GHSA-9g5q-2w5x-hmxf.
 	r.Use(middleware.Recoverer)
 	r.Use(jsonContentType)
 

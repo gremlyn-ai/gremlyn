@@ -75,12 +75,12 @@ Prefer a **Go test harness** over reimplementing logic in Python — it measures
 
 ```bash
 # a build-tagged measurement suite, kept out of the normal test run
-go test -tags=research ./internal/detection/ -run TestCorpus -v > docs/Research/<topic>/raw.txt
+go test -tags=research ./internal/shield/detection/ -run TestCorpus -v > docs/Research/<topic>/raw.txt
 ```
 
 For latency:
 ```bash
-go test -bench=BenchmarkDetect -benchmem -count=10 ./internal/detection/ > bench.txt
+go test -bench=BenchmarkDetect -benchmem -count=10 ./internal/shield/detection/ > bench.txt
 benchstat bench.txt
 ```
 
@@ -99,7 +99,7 @@ Python is fine for **analysis and plotting** of exported CSVs. It is not fine fo
 | Need | Source |
 |---|---|
 | Detection patterns under test | `internal/shield/detection/regex.go` |
-| Existing corpus cases | `internal/shield/detection/regex_test.go`, `internal/policy/*_test.go` |
+| Existing corpus cases | `internal/shield/detection/regex_test.go`, `internal/shield/policy/*_test.go` |
 | PII patterns | `internal/shield/policy/pii.go` |
 | Policy decisions on real traffic | `events` table — `~/.gremlyn/shield.db` (SQLite, default) |
 | Session events + reports | `arena_events`, `sessions` — `~/.gremlyn/arena.db` |

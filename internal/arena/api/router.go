@@ -25,7 +25,9 @@ func NewRouter(arena *service.Arena, hub *Hub, logger zerolog.Logger) *chi.Mux {
 		MaxAge:           300,
 	}))
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.RealIP)
+	// Deliberately NOT middleware.RealIP — see the note in
+	// internal/shield/api/router.go. Client-controlled forwarding headers must
+	// not overwrite the real socket address.
 	r.Use(jsonContentType)
 
 	r.Route("/arena", func(r chi.Router) {
