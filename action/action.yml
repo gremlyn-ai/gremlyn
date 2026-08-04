@@ -1,0 +1,237 @@
+name: Gremlyn Arena
+description: Inject controlled failures into your AI agent's MCP tools and fail the build if it gets less resilient
+author: gremlyn-ai
+branding:
+  icon: zap
+  color: red
+
+inputs:
+  config:
+    description: Path to the Arena scenario config
+    required: false
+    default: .gremlyn/arena.yaml
+  version:
+    description: Gremlyn version to install (a tag, or "latest")
+    required: false
+    default: latest
+  min-score:
+    description: >
+      Overall resilience minimum. Overrides thresholds.min_overall in the config
+      when set, so a workflow can tighten the bar without editing the config.
+    required: false
+    default: ""
+  report:
+    description: Where to write the machine-readable JSON report
+    required: false
+    default: gremlyn-report.json
+  comment-on-pr:
+    description: Post the score, and its delta against the base branch, as a PR comment
+    required: false
+    default: "true"
+  fail-on-threshold:
+    description: >
+      Fail the job when a threshold is missed. Set to false to report the score
+      without gating, which is the sane way to adopt this on an existing project.
+    required: false
+    default: "true"
+
+outputs:
+  passed:
+    description: Whether every scenario met its thresholds
+    value: ${{ steps.run.outputs.passed }}
+  score:
+    description: Lowest overall resilience score across scenarios
+    value: ${{ steps.run.outputs.score }}
+  report:
+    description: Path to the JSON report
+    value: ${{ steps.run.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install gremlyn
+      shell: bash
+      env:
+        GREMLYN_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        dir="${RUNNER_TEMP}/gremlyn-bin"
+        mkdir -p "$dir"
+
+        if [ "$GREMLYN_VERSION" = "latest" ]; then
+          tag=$(curl -fsSL https://api.github.com/repos/gremlyn-ai/gremlyn/releases/latest \
+                | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+        else
+          tag="$GREMLYN_VERSION"
+        fi
+        [ -n "$tag" ] || { echo "::error::could not determine the gremlyn version to install"; exit 1; }
+
+        case "$(uname -m)" in
+          x86_64|amd64) arch=amd64 ;;
+          aarch64|arm64) arch=arm64 ;;
+          *) echo "::error::unsupported architecture $(uname -m)"; exit 1 ;;
+        esac
+        os=$(uname -s | tr '[:upper:]' '[:lower:]')
+
+        num="${tag#v}"
+        archive="gremlyn_${num}_${os}_${arch}.tar.gz"
+        base="https://github.com/gremlyn-ai/gremlyn/releases/download/${tag}"
+
+        curl -fsSL -o "$dir/$archive" "$base/$archive"
+
+        # Verify before running. A CI job that executes an unverified download from
+        # the internet is a supply-chain hole, and this is a security tool.
+        curl -fsSL -o "$dir/checksums.txt" "$base/checksums.txt"
+        ( cd "$dir" && sha256sum -c checksums.txt --ignore-missing )
+
+        tar -xzf "$dir/$archive" -C "$dir"
+        echo "$dir" >> "$GITHUB_PATH"
+        "$dir/gremlyn" version
+
+    - name: Run Arena
+      id: run
+      shell: bash
+      env:
+        CONFIG: ${{ inputs.config }}
+        REPORT: ${{ inputs.report }}
+        MIN_SCORE: ${{ inputs.min-score }}
+        FAIL_ON_THRESHOLD: ${{ inputs.fail-on-threshold }}
+      run: |
+        set -uo pipefail
+
+        if [ ! -f "$CONFIG" ]; then
+          echo "::error::config not found: $CONFIG"
+          exit 1
+        fi
+
+        # An override lets a workflow raise the bar without editing the config.
+        if [ -n "$MIN_SCORE" ]; then
+          python3 - "$CONFIG" "$MIN_SCORE" <<'PY'
+        import sys, re, pathlib
+        path, minimum = sys.argv[1], sys.argv[2]
+        p = pathlib.Path(path)
+        text = p.read_text()
+        if re.search(r'^\s*min_overall:', text, re.M):
+            text = re.sub(r'^(\s*)min_overall:.*$', rf'\1min_overall: {minimum}', text, flags=re.M)
+        elif re.search(r'^thresholds:', text, re.M):
+            text = re.sub(r'^(thresholds:)\s*$', rf'\1\n  min_overall: {minimum}', text, flags=re.M)
+        else:
+            text += f"\nthresholds:\n  min_overall: {minimum}\n"
+        p.write_text(text)
+        PY
+        fi
+
+        set +e
+        gremlyn arena ci --config "$CONFIG" --format text --out "$REPORT"
+        status=$?
+        set -e
+
+        passed=true
+        [ "$status" -eq 0 ] || passed=false
+        echo "passed=$passed" >> "$GITHUB_OUTPUT"
+        echo "report=$REPORT" >> "$GITHUB_OUTPUT"
+
+        score=""
+        if [ -f "$REPORT" ]; then
+          score=$(python3 -c "
+        import json,sys
+        d=json.load(open('$REPORT'))
+        s=[x['report']['overall'] for x in d.get('scenarios',[])]
+        print(min(s) if s else '')
+        " 2>/dev/null || true)
+        fi
+        echo "score=$score" >> "$GITHUB_OUTPUT"
+
+        {
+          echo "## 🔥 Gremlyn Arena"
+          echo
+          if [ "$passed" = "true" ]; then
+            echo "✅ All scenarios passed."
+          else
+            echo "❌ Thresholds not met."
+          fi
+          echo
+          if [ -f "$REPORT" ]; then
+            python3 - "$REPORT" <<'PY'
+        import json, sys
+        d = json.load(open(sys.argv[1]))
+        print("| Scenario | Score | Grade | Coverage | Status |")
+        print("|---|---:|---|---|---|")
+        for s in d.get("scenarios", []):
+            r, c = s["report"], s["coverage"]
+            ok = "✅" if not s.get("failures") else "❌"
+            cov = f'{c["observed"]}/{c["injected"]}'
+            print(f'| {s["name"]} | {r["overall"]} | {r.get("grade","")} | {cov} | {ok} |')
+        for s in d.get("scenarios", []):
+            for f in s.get("failures", []):
+                print(f'\n- **{s["name"]}**: {f}')
+        PY
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "$passed" = "false" ] && [ "$FAIL_ON_THRESHOLD" = "true" ]; then
+          exit 1
+        fi
+        exit 0
+
+    - name: Upload report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: gremlyn-report
+        path: ${{ inputs.report }}
+        if-no-files-found: warn
+
+    - name: Comment on the PR
+      if: ${{ always() && inputs.comment-on-pr == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      env:
+        REPORT: ${{ inputs.report }}
+      with:
+        script: |
+          const fs = require('fs');
+          const path = process.env.REPORT;
+          if (!fs.existsSync(path)) return;
+          const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+
+          const rows = data.scenarios.map(s => {
+            const ok = (s.failures || []).length === 0 ? '✅' : '❌';
+            const cov = `${s.coverage.observed}/${s.coverage.injected}`;
+            return `| ${s.name} | ${s.report.overall} | ${s.report.grade || ''} | ${cov} | ${ok} |`;
+          }).join('\n');
+
+          const failures = data.scenarios.flatMap(s =>
+            (s.failures || []).map(f => `- **${s.name}**: ${f}`)).join('\n');
+
+          const body = [
+            '## 🔥 Gremlyn Arena',
+            '',
+            data.passed ? '✅ All scenarios passed.' : '❌ Thresholds not met.',
+            '',
+            '| Scenario | Score | Grade | Coverage | Status |',
+            '|---|---:|---|---|---|',
+            rows,
+            failures ? '\n' + failures : '',
+            '',
+            '<sub>Coverage is observed/injected. A scenario that injected nothing tested nothing.</sub>',
+            '<!-- gremlyn-arena -->',
+          ].join('\n');
+
+          // Update the existing comment rather than adding one per push, so a
+          // long-running PR does not accumulate a wall of them.
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner, repo: context.repo.repo,
+            issue_number: context.issue.number, per_page: 100,
+          });
+          const mine = comments.find(c => c.body && c.body.includes('<!-- gremlyn-arena -->'));
+          if (mine) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: mine.id, body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, body,
+            });
+          }

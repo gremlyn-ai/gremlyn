@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # GoReleaser needs the full history for the changelog
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      # Never release something that has not passed the gate. A tag is permanent:
+      # the Go module proxy caches a version forever, so a bad release cannot be
+      # replaced, only superseded.
+      - name: Gate
+        run: |
+          go vet ./...
+          go test -race -count=1 ./...
+          CGO_ENABLED=0 go build ./...
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A separate token is needed to push the generated formula to the tap.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      # A downloadable artifact that cannot wrap an MCP server is a broken
+      # release, regardless of what the build said.
+      - name: Verify the published binary
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          num="${tag#v}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}"
+          curl -fsSL -o g.tar.gz "${base}/gremlyn_${num}_linux_amd64.tar.gz"
+          curl -fsSL -o checksums.txt "${base}/checksums.txt"
+          sha256sum -c checksums.txt --ignore-missing
+          tar -xzf g.tar.gz
+          ./gremlyn version
+          ./gremlyn doctor || true

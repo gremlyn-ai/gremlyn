@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - run: go vet ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # -race is mandatory, not optional. The proxy is full duplex and Arena runs
+      # concurrent sessions; a non-race run proves very little here, and a data
+      # race on a policy decision is a security bug rather than a flake.
+      - name: go test -race
+        run: go test -race -count=1 ./... -coverprofile=coverage.out
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+  # Guards the property the whole distribution depends on: pure-Go SQLite is why
+  # these binaries are static and cross-compile without a per-target toolchain.
+  # A CGO dependency would break every release target at once.
+  cgo-free:
+    name: CGO_ENABLED=0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - run: CGO_ENABLED=0 go build ./...
+
+  build-matrix:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build ./...
+
+  # The only check that proves the product works. Everything else can be green
+  # while `gremlyn wrap` fails to speak MCP — which is exactly what happened
+  # before the framing fix, for as long as the suite only covered constructors.
+  e2e:
+    name: End to end against a real MCP server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: make build
+
+      - name: wrap a real MCP server
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | timeout 120 ./bin/gremlyn wrap -- npx -y @modelcontextprotocol/server-memory > out.jsonl 2>err.log
+
+          echo "--- proxy output ---"; cat out.jsonl
+          n=$(grep -c '"jsonrpc"' out.jsonl || true)
+          if [ "$n" -lt 2 ]; then
+            echo "::error::expected initialize and tools/list to round-trip, got $n responses"
+            cat err.log; exit 1
+          fi
+          grep -q '"id":1' out.jsonl || { echo "::error::initialize did not round-trip"; exit 1; }
+          grep -q '"id":2' out.jsonl || { echo "::error::tools/list did not round-trip"; exit 1; }
+
+      - name: chaos writes observations
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_graph","arguments":{}}}' \
+            | timeout 120 ./bin/gremlyn wrap \
+                --chaos-gremlins corruption --chaos-intensity certain --chaos-seed 42 \
+                --chaos-events events.jsonl --chaos-summary summary.json \
+                -- npx -y @modelcontextprotocol/server-memory >/dev/null 2>chaos.log
+
+          echo "--- summary ---"; cat summary.json
+          python3 -c "
+          import json,sys
+          s=json.load(open('summary.json'))['coverage']
+          assert s['injected'] > 0, 'no gremlin fired, so nothing was measured'
+          assert s['unresolved'] == 0, f\"unresolved injections: {s}\"
+          print('coverage OK:', s)
+          "
+
+  dashboard:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      # npm ci, never npm install: the lockfile is the contract.
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npx vitest run
+      # A dev server that renders while the build fails is a common Next.js gap.
+      - run: npm run build
