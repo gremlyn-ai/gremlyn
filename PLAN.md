@@ -39,7 +39,20 @@ Cible : un repo, `cmd/{gremlyn,shield,arena}`, `pkg/` partagé, `internal/{shiel
 
 **Irréversible → nécessite un go explicite.** Non bloquant pour P0.1.
 
-### P0.1 — `GremlinHandler` : les gremlins deviennent des étapes de pipeline · taille S · ✅ FAIT
+### P0.0bis — Le proxy ne parlait pas MCP · ✅ FAIT (découvert en cours de route)
+
+`gremlyn wrap` n'avait **jamais** fonctionné de bout en bout. Deux bugs, antérieurs à la fusion :
+
+1. **Mauvais framing.** `StdioTransport` utilisait le framing `Content-Length:` — celui de **LSP** — en affirmant dans son commentaire que c'était « as used by MCP over stdio ». MCP sur stdio est du **JSON délimité par sauts de ligne**. Le proxy ne pouvait parser aucun octet émis par un vrai client ni par un vrai serveur.
+2. **Le teardown jetait les réponses en vol.** `Start` sélectionnait sur un canal partagé par les trois boucles : le client atteignant EOF tuait l'enfant avant que sa réponse ait été lue.
+
+**C'est très probablement la raison pour laquelle le runner Arena fabrique ses propres messages** — le vrai chemin ne fonctionnait pas, donc il a été contourné.
+
+Corrigé : `LineFramer`, semi-fermeture avec drainage borné, `WithClientIO` pour rendre le chemin de données testable, et `wrap_dataflow_test.go` (aucun test n'exerçait le chemin de données, c'est pour ça que les bugs ont survécu).
+
+Vérifié : `gremlyn wrap -- npx -y @modelcontextprotocol/server-memory` → `initialize` et `tools/list` traversent, les 9 outils intacts.
+
+### P0.1 — `GremlinHandler` : les gremlins deviennent des étapes de pipeline · taille S · ⏳ à faire
 
 ```
 agent → [proxy + GremlinHandler] → vrai serveur MCP
@@ -154,17 +167,24 @@ Composite action : télécharge le binaire (ou image Docker), lance la commande,
 ## Séquencement
 
 ```
-P0.0  fusion monorepo                 S   ⏸ décision
-P0.1  GremlinHandler → pipeline       S   ✅ fait
-P0.2  ObserverHandler → outcome réel  M   ← le vrai travail
-P0.3  validation discriminance        S   ← GATE
+P0.0    fusion monorepo                 S   ✅ fait
+P0.0bis framing MCP + teardown proxy    M   ✅ fait (wrap fonctionne enfin)
+P0.1    GremlinHandler → pipeline       S   ⏳ suivant
+P0.2    ObserverHandler → outcome réel  M   ← le vrai travail
+P0.3    validation discriminance        S   ← GATE
 ─────────────────────────────────────────────────────
-P1    GoReleaser + go install + brew  S   → publiable
+P1      GoReleaser + go install + brew  S   → publiable
 ─────────────────────────────────────────────────────
-P2.0  valider contrat agent headless  S   ← GATE
-P2.1  arena ci en process             M
-P2.2  GitHub Action                   S
+P2.0    valider contrat agent headless  S   ← GATE
+P2.1    arena ci en process             M
+P2.2    GitHub Action                   S
 ```
+
+## Dette identifiée, non traitée
+
+- **`.claude/` décrit encore un monde à quatre repos** : les chemins sont corrigés, mais le narratif (chaîne de versions core→consumers, boucles shell sur 4 dossiers) est obsolète dans `skills/release-build`, `agents/release-infrastructure`, `workflow.md`, `commands/{workflow,journal,changelog,commit}`, `skills/{stack-health,bug-triage}`, `agents/{code-reviewer,test-results-analyzer}`, `rules/go/{lint-vet,layering}`.
+- **`golangci-lint`, `goimports`, `benchstat` ne sont pas installés** — `make lint` et `make check` échouent donc sur l'étape lint.
+- **Les anciens dossiers sont sauvegardés** dans `../gremlyn-old-repos-backup/` (13 Mo) et peuvent être supprimés après vérification.
 
 ---
 
