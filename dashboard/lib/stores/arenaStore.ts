@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, type StorageValue } from "zustand/middleware";
 import type { ArenaSession, ArenaEvent, GremlinInfo } from "@/lib/api/types";
 
 type ArenaState = {
@@ -21,8 +21,11 @@ type ArenaState = {
   toggleTerminal: () => void;
 };
 
+/** Only the live session survives a reload — events are refetched from the REST API. */
+type ArenaPersistedState = Pick<ArenaState, "currentSession">;
+
 export const useArenaStore = create<ArenaState>()(
-  persist(
+  persist<ArenaState, [], [], ArenaPersistedState>(
     (set) => ({
       currentSession: null,
       events: [],
@@ -54,7 +57,7 @@ export const useArenaStore = create<ArenaState>()(
       storage: {
         getItem: (name) => {
           const str = sessionStorage.getItem(name);
-          return str ? JSON.parse(str) : null;
+          return str ? (JSON.parse(str) as StorageValue<ArenaPersistedState>) : null;
         },
         setItem: (name, value) => sessionStorage.setItem(name, JSON.stringify(value)),
         removeItem: (name) => sessionStorage.removeItem(name),

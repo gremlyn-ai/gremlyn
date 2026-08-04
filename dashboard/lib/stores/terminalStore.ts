@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, type StorageValue } from "zustand/middleware";
 
 type HistoryEntry = {
   type: "input" | "output" | "error";
@@ -21,8 +21,11 @@ type TerminalState = {
   setHistoryIndex: (index: number) => void;
 };
 
+/** Only the recalled command list survives a reload — the transcript is per-session. */
+type TerminalPersistedState = Pick<TerminalState, "commandHistory">;
+
 export const useTerminalStore = create<TerminalState>()(
-  persist(
+  persist<TerminalState, [], [], TerminalPersistedState>(
     (set) => ({
       isOpen: false,
       history: [],
@@ -58,7 +61,7 @@ export const useTerminalStore = create<TerminalState>()(
       storage: {
         getItem: (name) => {
           const str = sessionStorage.getItem(name);
-          return str ? JSON.parse(str) : null;
+          return str ? (JSON.parse(str) as StorageValue<TerminalPersistedState>) : null;
         },
         setItem: (name, value) => sessionStorage.setItem(name, JSON.stringify(value)),
         removeItem: (name) => sessionStorage.removeItem(name),

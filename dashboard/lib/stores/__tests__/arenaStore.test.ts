@@ -2,6 +2,35 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useArenaStore } from "../arenaStore";
 import type { ArenaSession, ArenaEvent } from "@/lib/api/types";
 
+/** Builds a session with every field the Arena API always serializes (models.ArenaSession). */
+function makeSession(overrides: Partial<ArenaSession> = {}): ArenaSession {
+  return {
+    id: "sess-001",
+    server_id: "hubspot",
+    status: "running",
+    config: { gremlins: ["hallucination", "latency"], intensity: "high", prompts: [] },
+    gremlins_sent: 0,
+    gremlins_survived: 0,
+    gremlins_crashed: 0,
+    started_at: "2026-04-08T10:00:00Z",
+    ...overrides,
+  };
+}
+
+/** Builds an event with every field the Arena API always serializes (models.ArenaEvent). */
+function makeEvent(overrides: Partial<ArenaEvent> = {}): ArenaEvent {
+  return {
+    id: "evt-001",
+    session_id: "sess-001",
+    gremlin_type: "hallucination",
+    gremlin_config: {},
+    injected_at: "2026-04-08T10:01:00Z",
+    outcome: "survived",
+    score: 100,
+    ...overrides,
+  };
+}
+
 describe("useArenaStore", () => {
   beforeEach(() => {
     useArenaStore.setState({
@@ -27,38 +56,21 @@ describe("useArenaStore", () => {
   });
 
   it("setSession updates currentSession", () => {
-    const session: ArenaSession = {
-      id: "sess-001",
-      status: "running",
-      config: { gremlins: ["hallucination", "latency"], intensity: 0.7 },
-      created_at: "2026-04-08T10:00:00Z",
-    };
+    const session = makeSession();
 
     useArenaStore.getState().setSession(session);
     expect(useArenaStore.getState().currentSession).toEqual(session);
   });
 
   it("setSession to null clears the session", () => {
-    useArenaStore.getState().setSession({
-      id: "sess-001",
-      status: "running",
-      config: { gremlins: ["hallucination"], intensity: 0.5 },
-      created_at: "2026-04-08T10:00:00Z",
-    });
+    useArenaStore.getState().setSession(makeSession());
 
     useArenaStore.getState().setSession(null);
     expect(useArenaStore.getState().currentSession).toBeNull();
   });
 
   it("addEvent appends to events array", () => {
-    const event: ArenaEvent = {
-      id: "evt-001",
-      session_id: "sess-001",
-      gremlin_type: "hallucination",
-      outcome: "survived",
-      score: 85,
-      timestamp: "2026-04-08T10:01:00Z",
-    };
+    const event = makeEvent({ score: 85 });
 
     useArenaStore.getState().addEvent(event);
     expect(useArenaStore.getState().events).toHaveLength(1);
@@ -67,9 +79,21 @@ describe("useArenaStore", () => {
 
   it("addEvent accumulates multiple events without loss", () => {
     const events: ArenaEvent[] = [
-      { id: "evt-001", session_id: "s1", gremlin_type: "hallucination", outcome: "survived", score: 100, timestamp: "2026-04-08T10:01:00Z" },
-      { id: "evt-002", session_id: "s1", gremlin_type: "latency", outcome: "degraded", score: 50, timestamp: "2026-04-08T10:01:01Z" },
-      { id: "evt-003", session_id: "s1", gremlin_type: "corruption", outcome: "crashed", score: 0, timestamp: "2026-04-08T10:01:02Z" },
+      makeEvent({ id: "evt-001", injected_at: "2026-04-08T10:01:00Z" }),
+      makeEvent({
+        id: "evt-002",
+        gremlin_type: "latency",
+        outcome: "degraded",
+        score: 50,
+        injected_at: "2026-04-08T10:01:01Z",
+      }),
+      makeEvent({
+        id: "evt-003",
+        gremlin_type: "corruption",
+        outcome: "crashed",
+        score: 0,
+        injected_at: "2026-04-08T10:01:02Z",
+      }),
     ];
 
     for (const e of events) {
@@ -85,14 +109,7 @@ describe("useArenaStore", () => {
   });
 
   it("clearEvents resets to empty", () => {
-    useArenaStore.getState().addEvent({
-      id: "evt-001",
-      session_id: "s1",
-      gremlin_type: "hallucination",
-      outcome: "survived",
-      score: 100,
-      timestamp: "2026-04-08T10:01:00Z",
-    });
+    useArenaStore.getState().addEvent(makeEvent());
 
     useArenaStore.getState().clearEvents();
     expect(useArenaStore.getState().events).toEqual([]);

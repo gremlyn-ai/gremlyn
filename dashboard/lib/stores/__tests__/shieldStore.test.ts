@@ -2,6 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useShieldStore } from "../shieldStore";
 import type { Rule, ShieldEvent, ShieldMetricsResponse } from "@/lib/api/types";
 
+/** Timestamps the Shield API always serializes on a Rule (models.Rule.CreatedAt/UpdatedAt). */
+const RULE_TIMESTAMPS = {
+  created_at: "2026-04-08T09:00:00Z",
+  updated_at: "2026-04-08T09:00:00Z",
+} as const;
+
 describe("useShieldStore", () => {
   beforeEach(() => {
     useShieldStore.setState({
@@ -34,6 +40,7 @@ describe("useShieldStore", () => {
         action: "block",
         enabled: true,
         match: { tool: "search_contacts", args: { limit: { greater_than: 100 } } },
+        ...RULE_TIMESTAMPS,
       },
       {
         id: "rule-002",
@@ -41,6 +48,7 @@ describe("useShieldStore", () => {
         action: "block_and_alert",
         enabled: true,
         match: { tool: "delete_contact" },
+        ...RULE_TIMESTAMPS,
       },
     ];
 
@@ -51,8 +59,14 @@ describe("useShieldStore", () => {
 
   it("toggleRule flips enabled flag for matching rule ID", () => {
     const rules: Rule[] = [
-      { id: "rule-001", name: "block-export", action: "block", enabled: true },
-      { id: "rule-002", name: "scan-responses", action: "block_and_alert", enabled: true },
+      { id: "rule-001", name: "block-export", action: "block", enabled: true, ...RULE_TIMESTAMPS },
+      {
+        id: "rule-002",
+        name: "scan-responses",
+        action: "block_and_alert",
+        enabled: true,
+        ...RULE_TIMESTAMPS,
+      },
     ];
 
     useShieldStore.getState().setRules(rules);
@@ -65,9 +79,9 @@ describe("useShieldStore", () => {
 
   it("toggleRule does not affect other rules", () => {
     const rules: Rule[] = [
-      { id: "r1", name: "rule-a", action: "block", enabled: true },
-      { id: "r2", name: "rule-b", action: "redact", enabled: false },
-      { id: "r3", name: "rule-c", action: "log_only", enabled: true },
+      { id: "r1", name: "rule-a", action: "block", enabled: true, ...RULE_TIMESTAMPS },
+      { id: "r2", name: "rule-b", action: "redact", enabled: false, ...RULE_TIMESTAMPS },
+      { id: "r3", name: "rule-c", action: "log_only", enabled: true, ...RULE_TIMESTAMPS },
     ];
 
     useShieldStore.getState().setRules(rules);
@@ -81,7 +95,7 @@ describe("useShieldStore", () => {
 
   it("toggleRule with non-existent ID is a no-op", () => {
     const rules: Rule[] = [
-      { id: "r1", name: "rule-a", action: "block", enabled: true },
+      { id: "r1", name: "rule-a", action: "block", enabled: true, ...RULE_TIMESTAMPS },
     ];
 
     useShieldStore.getState().setRules(rules);
@@ -91,18 +105,19 @@ describe("useShieldStore", () => {
   });
 
   it("setMetrics updates metrics", () => {
+    // Shape mirrors Go api.MetricsResponse: counts bucketed by action_taken / severity.
     const metrics: ShieldMetricsResponse = {
-      total_events: 1500,
-      blocked_events: 42,
-      allowed_events: 1400,
-      redacted_events: 58,
-      avg_latency_ms: 12,
-      events_per_minute: 25,
+      event_counts: { allowed: 1400, blocked: 42, redacted: 58 },
+      alert_counts: { critical: 2, high: 5, medium: 11 },
+      period_hours: 24,
     };
 
     useShieldStore.getState().setMetrics(metrics);
     expect(useShieldStore.getState().metrics).toEqual(metrics);
-    expect(useShieldStore.getState().metrics?.blocked_events).toBe(42);
+    // The blocked tile on /shield reads this exact path.
+    expect(useShieldStore.getState().metrics?.event_counts.blocked).toBe(42);
+    expect(useShieldStore.getState().metrics?.alert_counts.critical).toBe(2);
+    expect(useShieldStore.getState().metrics?.period_hours).toBe(24);
   });
 
   it("setEvents updates recentEvents", () => {

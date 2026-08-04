@@ -1,4 +1,5 @@
-# Binaries
+# Binaries — the Makefile writes to bin/
+/bin/
 /gremlyn
 /shield
 /arena
