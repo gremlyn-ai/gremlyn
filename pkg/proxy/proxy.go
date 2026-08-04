@@ -3,6 +3,8 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"time"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/models"
@@ -39,9 +41,11 @@ type Config struct {
 type Option func(*proxyOptions)
 
 type proxyOptions struct {
-	logger   zerolog.Logger
-	pipeline *Pipeline
-	timeout  time.Duration
+	logger    zerolog.Logger
+	pipeline  *Pipeline
+	timeout   time.Duration
+	clientIn  io.Reader
+	clientOut io.Writer
 }
 
 // WithLogger sets the logger for the proxy.
@@ -65,10 +69,24 @@ func WithTimeout(d time.Duration) Option {
 	}
 }
 
+// WithClientIO overrides the client-facing streams, which default to
+// os.Stdin and os.Stdout.
+//
+// This exists so the full request/response path can be exercised in a test
+// without hijacking the process's real stdio.
+func WithClientIO(in io.Reader, out io.Writer) Option {
+	return func(o *proxyOptions) {
+		o.clientIn = in
+		o.clientOut = out
+	}
+}
+
 func applyOptions(opts []Option) *proxyOptions {
 	o := &proxyOptions{
-		logger:  zerolog.Nop(),
-		timeout: 30 * time.Second,
+		logger:    zerolog.Nop(),
+		timeout:   30 * time.Second,
+		clientIn:  os.Stdin,
+		clientOut: os.Stdout,
 	}
 	for _, opt := range opts {
 		opt(o)

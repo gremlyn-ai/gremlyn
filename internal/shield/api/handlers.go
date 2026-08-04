@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/gremlyn-ai/gremlyn/pkg/models"
 	"github.com/gremlyn-ai/gremlyn/internal/shield/service"
+	"github.com/gremlyn-ai/gremlyn/pkg/models"
 	"github.com/rs/zerolog"
 )
 

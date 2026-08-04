@@ -8,9 +8,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gremlyn-ai/gremlyn/internal/shield/service"
 	"github.com/gremlyn-ai/gremlyn/pkg/config"
 	"github.com/gremlyn-ai/gremlyn/pkg/models"
-	"github.com/gremlyn-ai/gremlyn/internal/shield/service"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -94,7 +94,7 @@ func (m *memServerStore) GetByID(_ context.Context, _ string) (*models.Server, e
 func (m *memServerStore) GetByName(_ context.Context, _ string) (*models.Server, error) {
 	return nil, nil
 }
-func (m *memServerStore) List(_ context.Context) ([]models.Server, error) { return m.servers, nil }
+func (m *memServerStore) List(_ context.Context) ([]models.Server, error)  { return m.servers, nil }
 func (m *memServerStore) Update(_ context.Context, _ *models.Server) error { return nil }
 func (m *memServerStore) Delete(_ context.Context, _ string) error         { return nil }
 

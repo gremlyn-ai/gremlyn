@@ -10,13 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gremlyn-ai/gremlyn/pkg/config"
-	"github.com/gremlyn-ai/gremlyn/pkg/datadir"
 	"github.com/gremlyn-ai/gremlyn/internal/shield/alert"
 	"github.com/gremlyn-ai/gremlyn/internal/shield/api"
 	"github.com/gremlyn-ai/gremlyn/internal/shield/service"
 	"github.com/gremlyn-ai/gremlyn/internal/shield/storage/postgres"
 	sqlitestore "github.com/gremlyn-ai/gremlyn/internal/shield/storage/sqlite"
+	"github.com/gremlyn-ai/gremlyn/pkg/config"
+	"github.com/gremlyn-ai/gremlyn/pkg/datadir"
 	"github.com/rs/zerolog"
 )
 

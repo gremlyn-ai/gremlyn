@@ -23,6 +23,8 @@ type WrapProxy struct {
 	pipeline        *Pipeline
 	logger          zerolog.Logger
 	timeout         time.Duration
+	clientIn        io.Reader
+	clientOut       io.Writer
 	cmd             *exec.Cmd
 	childStdin      io.WriteCloser
 	childStdout     io.ReadCloser
@@ -31,17 +33,29 @@ type WrapProxy struct {
 	serverTransport *protocol.StdioTransport
 	done            chan struct{}
 	stopOnce        sync.Once
+	stdinCloseOnce  sync.Once
 }
+
+// drainGracePeriod bounds how long we keep reading the child's responses after
+// the client has stopped sending. A well-behaved MCP server exits once its stdin
+// closes; this stops a misbehaving one from hanging the proxy forever.
+const drainGracePeriod = 10 * time.Second
+
+// childExitGrace is how long a child gets to exit on its own after its stdin is
+// closed, before it is killed.
+const childExitGrace = 2 * time.Second
 
 // NewWrapProxy creates a new WrapProxy with the given configuration.
 func NewWrapProxy(cfg Config, opts ...Option) *WrapProxy {
 	o := applyOptions(opts)
 	return &WrapProxy{
-		cfg:      cfg,
-		pipeline: o.pipeline,
-		logger:   o.logger.With().Str("component", "wrap-proxy").Str("server", cfg.ServerName).Logger(),
-		timeout:  o.timeout,
-		done:     make(chan struct{}),
+		cfg:       cfg,
+		pipeline:  o.pipeline,
+		logger:    o.logger.With().Str("component", "wrap-proxy").Str("server", cfg.ServerName).Logger(),
+		timeout:   o.timeout,
+		clientIn:  o.clientIn,
+		clientOut: o.clientOut,
+		done:      make(chan struct{}),
 	}
 }
 
@@ -54,7 +68,7 @@ func (w *WrapProxy) Start(ctx context.Context) error {
 
 	// Create transports for both sides.
 	// Client side: our stdin/stdout (MCP client talks to us).
-	w.clientTransport = protocol.NewStdioTransport(os.Stdin, os.Stdout)
+	w.clientTransport = protocol.NewStdioTransport(w.clientIn, w.clientOut)
 	// Server side: child's stdout/stdin (we talk to the real MCP server).
 	w.serverTransport = protocol.NewStdioTransport(w.childStdout, w.childStdin)
 
@@ -63,94 +77,151 @@ func (w *WrapProxy) Start(ctx context.Context) error {
 		Strs("args", w.cfg.Args).
 		Msg("wrap proxy started")
 
-	// Launch goroutines for bidirectional traffic.
-	errCh := make(chan error, 3)
+	// The two data loops are NOT interchangeable, and must not share a channel.
+	//
+	// The client reaching EOF means "no more requests", not "session over": the
+	// server may still owe us responses for requests already in flight. Tearing
+	// down here would drop them, which is what made `gremlyn wrap` forward a
+	// request and never return its answer. So we half-close instead — close the
+	// child's stdin to let it finish, then keep draining until it closes its own
+	// output.
+	//
+	// The server closing IS the end of the session.
+	//
+	// stderr is diagnostic only and must never trigger shutdown.
+	clientDone := make(chan error, 1)
+	serverDone := make(chan error, 1)
 
-	go func() {
-		errCh <- w.clientToServerLoop(ctx)
-	}()
-	go func() {
-		errCh <- w.serverToClientLoop(ctx)
-	}()
-	go func() {
-		errCh <- w.stderrLoop()
-	}()
+	go func() { clientDone <- w.clientToServerLoop(ctx) }()
+	go func() { serverDone <- w.serverToClientLoop(ctx) }()
+	go func() { _ = w.stderrLoop() }()
 
-	// Wait for context cancellation, child exit, or error.
-	select {
-	case <-ctx.Done():
-		w.logger.Info().Msg("context cancelled, shutting down")
-	case err := <-errCh:
-		if err != nil && !errors.Is(err, io.EOF) {
-			w.logger.Error().Err(err).Msg("proxy loop error")
+	var drainDeadline <-chan time.Time // nil until the client half-closes
+
+	for {
+		select {
+		case <-ctx.Done():
+			w.logger.Info().Msg("context cancelled, shutting down")
+			return w.Stop()
+
+		case err := <-clientDone:
+			if err != nil && !errors.Is(err, io.EOF) {
+				w.logger.Error().Err(err).Msg("client loop error")
+				return w.Stop()
+			}
+			w.logger.Debug().Msg("client stopped sending, draining server responses")
+			w.closeChildStdin()
+			clientDone = nil // a nil channel never fires again
+			drainDeadline = time.After(drainGracePeriod)
+
+		case err := <-serverDone:
+			if err != nil && !errors.Is(err, io.EOF) {
+				w.logger.Error().Err(err).Msg("server loop error")
+			}
+			w.logger.Debug().Msg("server closed connection, shutting down")
+			return w.Stop()
+
+		case <-drainDeadline:
+			w.logger.Warn().
+				Dur("grace", drainGracePeriod).
+				Msg("server did not close after client EOF, forcing shutdown")
+			return w.Stop()
 		}
 	}
+}
 
-	return w.Stop()
+// closeChildStdin signals end-of-input to the child MCP server. Safe to call
+// more than once; Stop calls it too.
+func (w *WrapProxy) closeChildStdin() {
+	w.stdinCloseOnce.Do(func() {
+		if w.childStdin == nil {
+			return
+		}
+		if err := w.childStdin.Close(); err != nil {
+			w.logger.Debug().Err(err).Msg("closing child stdin")
+		}
+	})
 }
 
 // Stop performs graceful shutdown of the proxy and child process.
+//
+// Failures during shutdown are logged rather than returned: by this point the
+// session is over, and there is nothing a caller could usefully do about a pipe
+// that refused to close.
 func (w *WrapProxy) Stop() error {
-	var stopErr error
 	w.stopOnce.Do(func() {
 		w.logger.Info().Msg("stopping wrap proxy")
 
-		// Close transports to unblock read loops.
+		// Close the child's stdin first: a well-behaved MCP server exits on its
+		// own once its input closes, which lets us avoid killing it outright.
+		w.closeChildStdin()
+
+		reaped := w.reapChild()
+
+		// Close transports to unblock any read loop still parked on a read.
 		if w.clientTransport != nil {
 			if err := w.clientTransport.Close(); err != nil {
-				w.logger.Warn().Err(err).Msg("failed to close client transport")
+				w.logger.Debug().Err(err).Msg("closing client transport")
 			}
 		}
 		if w.serverTransport != nil {
 			if err := w.serverTransport.Close(); err != nil {
-				w.logger.Warn().Err(err).Msg("failed to close server transport")
+				w.logger.Debug().Err(err).Msg("closing server transport")
 			}
 		}
 
-		// Terminate the child process.
-		if w.cmd != nil && w.cmd.Process != nil {
-			// On all platforms, use Kill (Windows has no SIGTERM).
-			if err := w.cmd.Process.Kill(); err != nil {
-				w.logger.Warn().Err(err).Msg("failed to kill child process")
-			}
-
-			// Wait for the child to exit with timeout.
-			waitDone := make(chan error, 1)
-			go func() {
-				waitDone <- w.cmd.Wait()
-			}()
-
-			select {
-			case err := <-waitDone:
-				if err != nil {
-					w.logger.Debug().Err(err).Msg("child process exited")
+		// cmd.Wait closes the pipes it created, so only close them ourselves if
+		// the child was never reaped — otherwise we race Wait's own cleanup.
+		if !reaped {
+			if w.childStdout != nil {
+				if err := w.childStdout.Close(); err != nil {
+					w.logger.Debug().Err(err).Msg("closing child stdout")
 				}
-			case <-time.After(5 * time.Second):
-				w.logger.Warn().Msg("child process did not exit within timeout")
 			}
-		}
-
-		// Close pipes.
-		if w.childStdin != nil {
-			if err := w.childStdin.Close(); err != nil {
-				w.logger.Debug().Err(err).Msg("closing child stdin")
-			}
-		}
-		if w.childStdout != nil {
-			if err := w.childStdout.Close(); err != nil {
-				w.logger.Debug().Err(err).Msg("closing child stdout")
-			}
-		}
-		if w.childStderr != nil {
-			if err := w.childStderr.Close(); err != nil {
-				w.logger.Debug().Err(err).Msg("closing child stderr")
+			if w.childStderr != nil {
+				if err := w.childStderr.Close(); err != nil {
+					w.logger.Debug().Err(err).Msg("closing child stderr")
+				}
 			}
 		}
 
 		close(w.done)
 		w.logger.Info().Msg("wrap proxy stopped")
 	})
-	return stopErr
+	return nil
+}
+
+// reapChild waits for the child to exit on its own, killing it if it overstays.
+// It reports whether cmd.Wait returned, which tells Stop whether the pipes have
+// already been cleaned up.
+func (w *WrapProxy) reapChild() bool {
+	if w.cmd == nil || w.cmd.Process == nil {
+		return false
+	}
+
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- w.cmd.Wait() }()
+
+	select {
+	case err := <-waitDone:
+		if err != nil {
+			w.logger.Debug().Err(err).Msg("child process exited")
+		}
+		return true
+	case <-time.After(childExitGrace):
+	}
+
+	// Kill on all platforms — Windows has no SIGTERM.
+	if err := w.cmd.Process.Kill(); err != nil {
+		w.logger.Debug().Err(err).Msg("killing child process")
+	}
+	select {
+	case <-waitDone:
+		return true
+	case <-time.After(5 * time.Second):
+		w.logger.Warn().Msg("child process did not exit within timeout")
+		return false
+	}
 }
 
 // Pipeline returns the analysis pipeline.

@@ -65,4 +65,3 @@ func newLogger(level string) zerolog.Logger {
 		Timestamp().
 		Logger()
 }
-

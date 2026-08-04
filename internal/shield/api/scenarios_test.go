@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gremlyn-ai/gremlyn/internal/shield/service"
 	"github.com/gremlyn-ai/gremlyn/pkg/config"
 	"github.com/gremlyn-ai/gremlyn/pkg/models"
-	"github.com/gremlyn-ai/gremlyn/internal/shield/service"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

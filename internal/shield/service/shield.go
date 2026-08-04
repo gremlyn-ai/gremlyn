@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/gremlyn-ai/gremlyn/internal/shield/alert"
+	"github.com/gremlyn-ai/gremlyn/internal/shield/policy"
 	"github.com/gremlyn-ai/gremlyn/pkg/config"
 	"github.com/gremlyn-ai/gremlyn/pkg/models"
 	"github.com/gremlyn-ai/gremlyn/pkg/proxy"
-	"github.com/gremlyn-ai/gremlyn/internal/shield/alert"
-	"github.com/gremlyn-ai/gremlyn/internal/shield/policy"
 	"github.com/rs/zerolog"
 )
 

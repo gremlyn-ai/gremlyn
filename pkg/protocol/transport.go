@@ -2,8 +2,10 @@ package protocol
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,10 +28,103 @@ type Transport interface {
 	Close() error
 }
 
-// --- Content-Length Framing (for stdio JSON-RPC) ---
+// --- Line Framing (MCP over stdio) ---
 
-// ContentLengthFramer handles content-length framed JSON-RPC messages
-// as used by MCP over stdio. Format: Content-Length: N\r\n\r\n{json}
+// MaxLineBytes caps a single newline-delimited message.
+//
+// The peer is an MCP server whose output is attacker-controlled as far as we are
+// concerned, and this proxy sits inline with the user's agent: an unbounded read
+// here is a memory DoS. The cap is generous because legitimate tool results can
+// be large (file contents, query results).
+const MaxLineBytes = 16 << 20 // 16 MiB
+
+// LineFramer handles newline-delimited JSON-RPC messages, which is the framing
+// MCP uses over stdio: exactly one JSON object per line, and messages must not
+// contain embedded newlines.
+//
+// This is deliberately NOT Content-Length framing. That belongs to LSP, and
+// confusing the two is easy because MCP borrowed much of its shape from LSP —
+// but a Content-Length reader cannot parse a single byte a real MCP server emits.
+type LineFramer struct{}
+
+// ReadFrame reads one newline-delimited message, skipping blank lines.
+func (f *LineFramer) ReadFrame(reader *bufio.Reader) ([]byte, error) {
+	for {
+		line, err := readLimitedLine(reader, MaxLineBytes)
+		if err != nil {
+			return nil, err
+		}
+
+		line = bytes.TrimRight(line, "\r\n")
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue // blank keep-alive line, not a message
+		}
+
+		// A Content-Length header means we are talking to an LSP-style peer.
+		// Say so plainly rather than failing as a JSON parse error three frames
+		// later — this misdiagnosis has cost real debugging time before.
+		if hasPrefixFold(line, []byte("content-length:")) {
+			return nil, fmt.Errorf(
+				"peer is using LSP Content-Length framing, but MCP over stdio is newline-delimited JSON")
+		}
+
+		return line, nil
+	}
+}
+
+// WriteFrame writes one newline-delimited message.
+func (f *LineFramer) WriteFrame(writer io.Writer, data []byte) error {
+	// A message carrying a raw newline would be read back as two truncated
+	// frames by any conforming peer, so refuse rather than corrupt the stream.
+	if bytes.ContainsAny(data, "\n\r") {
+		return fmt.Errorf("message contains an embedded newline, which MCP stdio framing forbids")
+	}
+	if len(data)+1 > MaxLineBytes {
+		return fmt.Errorf("message is %d bytes, over the %d byte frame limit", len(data), MaxLineBytes)
+	}
+	if _, err := writer.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("writing frame: %w", err)
+	}
+	return nil
+}
+
+// readLimitedLine reads up to and including '\n', failing if the line exceeds
+// limit rather than growing without bound.
+func readLimitedLine(reader *bufio.Reader, limit int) ([]byte, error) {
+	var out []byte
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		out = append(out, chunk...)
+		if len(out) > limit {
+			return nil, fmt.Errorf("message exceeds the %d byte frame limit", limit)
+		}
+		if err == nil {
+			return out, nil
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue // long line, keep accumulating
+		}
+		if errors.Is(err, io.EOF) && len(out) > 0 {
+			return out, nil // final line without a trailing newline
+		}
+		return nil, err
+	}
+}
+
+func hasPrefixFold(b, prefix []byte) bool {
+	if len(b) < len(prefix) {
+		return false
+	}
+	return bytes.EqualFold(b[:len(prefix)], prefix)
+}
+
+// --- Content-Length Framing (LSP, not MCP) ---
+
+// ContentLengthFramer handles content-length framed JSON-RPC messages, the
+// framing used by LSP. Format: Content-Length: N\r\n\r\n{json}
+//
+// MCP over stdio does NOT use this — see LineFramer. Kept for peers that speak
+// the LSP style.
 type ContentLengthFramer struct{}
 
 // ReadFrame reads one content-length-framed message from the reader.
@@ -98,11 +193,12 @@ func (f *ContentLengthFramer) WriteFrame(writer io.Writer, data []byte) error {
 // --- Stdio Transport ---
 
 // StdioTransport implements Transport for stdio-based MCP communication.
-// Messages are content-length framed JSON-RPC over stdin/stdout.
+// Messages are newline-delimited JSON-RPC over stdin/stdout, per the MCP stdio
+// transport.
 type StdioTransport struct {
 	reader  *bufio.Reader
 	writer  io.Writer
-	framer  ContentLengthFramer
+	framer  LineFramer
 	writeMu sync.Mutex
 	closed  bool
 	closeMu sync.Mutex

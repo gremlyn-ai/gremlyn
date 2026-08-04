@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gremlyn-ai/gremlyn/internal/shield/detection"
 	"github.com/gremlyn-ai/gremlyn/pkg/config"
 	"github.com/gremlyn-ai/gremlyn/pkg/models"
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
 	"github.com/gremlyn-ai/gremlyn/pkg/proxy"
-	"github.com/gremlyn-ai/gremlyn/internal/shield/detection"
 	"github.com/rs/zerolog"
 )
 
