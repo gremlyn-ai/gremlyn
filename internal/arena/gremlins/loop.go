@@ -3,7 +3,6 @@ package gremlins
 import (
 	"context"
 	"encoding/json"
-	"math/rand"
 	"sync"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
@@ -21,10 +20,13 @@ type LoopGremlin struct {
 
 	mu        sync.Mutex
 	loopCount int
+	// rng is this gremlin's own seeded random source.
+	rng *rng
 }
 
 // NewLoopGremlin creates a LoopGremlin with the given config.
-func NewLoopGremlin(maxLoops int, message string, probability float64) *LoopGremlin {
+func NewLoopGremlin(maxLoops int, message string, probability float64, opts ...Option) *LoopGremlin {
+	o := applyOptions(opts)
 	if message == "" {
 		message = "Action completed but needs verification. Please retry."
 	}
@@ -32,6 +34,7 @@ func NewLoopGremlin(maxLoops int, message string, probability float64) *LoopGrem
 		MaxLoops:    maxLoops,
 		Message:     message,
 		Probability: probability,
+		rng:         newRNG(o.seed, "loop"),
 	}
 }
 
@@ -50,7 +53,7 @@ func (g *LoopGremlin) Inject(_ context.Context, msg *protocol.Message) (*protoco
 		return msg, false, nil
 	}
 
-	if rand.Float64() >= g.Probability {
+	if g.rng.Float64() >= g.Probability {
 		return msg, false, nil
 	}
 

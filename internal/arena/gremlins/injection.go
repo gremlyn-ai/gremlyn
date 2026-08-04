@@ -3,7 +3,6 @@ package gremlins
 import (
 	"context"
 	"encoding/json"
-	"math/rand"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
 )
@@ -15,13 +14,17 @@ type InjectionGremlin struct {
 	Payload string `json:"payload"`
 	// Probability of injection (0.0–1.0).
 	Probability float64 `json:"probability"`
+	// rng is this gremlin's own seeded random source.
+	rng *rng
 }
 
 // NewInjectionGremlin creates an InjectionGremlin with the given config.
-func NewInjectionGremlin(payload string, probability float64) *InjectionGremlin {
+func NewInjectionGremlin(payload string, probability float64, opts ...Option) *InjectionGremlin {
+	o := applyOptions(opts)
 	return &InjectionGremlin{
 		Payload:     payload,
 		Probability: probability,
+		rng:         newRNG(o.seed, "injection"),
 	}
 }
 
@@ -39,7 +42,7 @@ func (g *InjectionGremlin) Inject(_ context.Context, msg *protocol.Message) (*pr
 		return msg, false, nil
 	}
 
-	if rand.Float64() >= g.Probability {
+	if g.rng.Float64() >= g.Probability {
 		return msg, false, nil
 	}
 

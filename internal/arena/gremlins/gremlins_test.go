@@ -374,14 +374,45 @@ func TestTimeout_RespectsContextCancellation(t *testing.T) {
 	assert.False(t, injected)
 }
 
-func TestTimeout_ReturnsErrorAfterTimeout(t *testing.T) {
+// A timeout must reach the agent as a JSON-RPC error, which is what a client
+// actually sees when a server stops answering.
+//
+// This test previously asserted the opposite — a Go error with injected=false.
+// That contract could not work: the pipeline handler treats a Go error from
+// Inject as "the gremlin malfunctioned" and forwards the message untouched, so
+// the agent received the original successful response and this gremlin did
+// nothing at all.
+func TestTimeout_ReportsTimeoutAsJSONRPCError(t *testing.T) {
 	g := NewTimeoutGremlin(1, 2, 1.0) // 1-2ms — fast for tests
 	msg := makeResponseMsg(`{"data":"test"}`)
 
-	_, injected, err := g.Inject(context.Background(), msg)
-	assert.Error(t, err)
+	out, injected, err := g.Inject(context.Background(), msg)
+	require.NoError(t, err, "a simulated timeout is not a gremlin malfunction")
+	require.True(t, injected)
+	require.NotNil(t, out.Response)
+	require.NotNil(t, out.Response.Error, "the agent must see an error it can react to")
+	assert.Contains(t, out.Response.Error.Message, "server timeout")
+	assert.Equal(t, jsonRPCTimeoutCode, out.Response.Error.Code)
+	assert.Nil(t, out.Response.Result, "a timed-out call must not also carry a result")
+
+	// The original message must be left alone.
+	assert.NotNil(t, msg.Response.Result)
+	assert.Nil(t, msg.Response.Error)
+}
+
+// A cancelled session while the gremlin is stalling is an abort, not an
+// observation: the message must be left untouched.
+func TestTimeout_CancelledContextDoesNotInject(t *testing.T) {
+	g := NewTimeoutGremlin(500, 1000, 1.0)
+	msg := makeResponseMsg(`{"data":"test"}`)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	out, injected, err := g.Inject(ctx, msg)
+	require.Error(t, err)
 	assert.False(t, injected)
-	assert.Contains(t, err.Error(), "server timeout")
+	assert.Equal(t, msg, out)
 }
 
 func TestTimeout_SkipsNonResponse(t *testing.T) {

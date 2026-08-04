@@ -2,7 +2,6 @@ package gremlins
 
 import (
 	"context"
-	"math/rand"
 	"time"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
@@ -19,14 +18,18 @@ type LatencyGremlin struct {
 	TargetTool string `json:"target_tool,omitempty"`
 	// Probability of injection (0.0–1.0).
 	Probability float64 `json:"probability"`
+	// rng is this gremlin's own seeded random source.
+	rng *rng
 }
 
 // NewLatencyGremlin creates a LatencyGremlin with the given config.
-func NewLatencyGremlin(minMs, maxMs int, probability float64) *LatencyGremlin {
+func NewLatencyGremlin(minMs, maxMs int, probability float64, opts ...Option) *LatencyGremlin {
+	o := applyOptions(opts)
 	return &LatencyGremlin{
 		MinDelayMs:  minMs,
 		MaxDelayMs:  maxMs,
 		Probability: probability,
+		rng:         newRNG(o.seed, "latency"),
 	}
 }
 
@@ -45,7 +48,7 @@ func (g *LatencyGremlin) Inject(ctx context.Context, msg *protocol.Message) (*pr
 		return msg, false, nil
 	}
 
-	if rand.Float64() >= g.Probability {
+	if g.rng.Float64() >= g.Probability {
 		return msg, false, nil
 	}
 
@@ -53,7 +56,7 @@ func (g *LatencyGremlin) Inject(ctx context.Context, msg *protocol.Message) (*pr
 	if delayRange <= 0 {
 		delayRange = 1
 	}
-	delay := time.Duration(g.MinDelayMs+rand.Intn(delayRange)) * time.Millisecond
+	delay := time.Duration(g.MinDelayMs+g.rng.Intn(delayRange)) * time.Millisecond
 
 	select {
 	case <-time.After(delay):

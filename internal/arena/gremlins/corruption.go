@@ -3,7 +3,7 @@ package gremlins
 import (
 	"context"
 	"encoding/json"
-	"math/rand"
+	"sort"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
 )
@@ -27,13 +27,17 @@ type CorruptionGremlin struct {
 	Mode CorruptionMode `json:"mode"`
 	// Probability of injection (0.0–1.0).
 	Probability float64 `json:"probability"`
+	// rng is this gremlin's own seeded random source.
+	rng *rng
 }
 
 // NewCorruptionGremlin creates a CorruptionGremlin with the given mode and probability.
-func NewCorruptionGremlin(mode CorruptionMode, probability float64) *CorruptionGremlin {
+func NewCorruptionGremlin(mode CorruptionMode, probability float64, opts ...Option) *CorruptionGremlin {
+	o := applyOptions(opts)
 	return &CorruptionGremlin{
 		Mode:        mode,
 		Probability: probability,
+		rng:         newRNG(o.seed, "corruption"),
 	}
 }
 
@@ -51,7 +55,7 @@ func (g *CorruptionGremlin) Inject(_ context.Context, msg *protocol.Message) (*p
 		return msg, false, nil
 	}
 
-	if rand.Float64() >= g.Probability {
+	if g.rng.Float64() >= g.Probability {
 		return msg, false, nil
 	}
 
@@ -60,7 +64,7 @@ func (g *CorruptionGremlin) Inject(_ context.Context, msg *protocol.Message) (*p
 
 	switch g.Mode {
 	case CorruptionModeMissingFields:
-		modResp.Result = corruptMissingFields(msg.Response.Result)
+		modResp.Result = corruptMissingFields(msg.Response.Result, g.rng)
 	case CorruptionModeWrongTypes:
 		modResp.Result = corruptWrongTypes()
 	case CorruptionModeTruncated:
@@ -73,14 +77,25 @@ func (g *CorruptionGremlin) Inject(_ context.Context, msg *protocol.Message) (*p
 	return &modified, true, nil
 }
 
-func corruptMissingFields(data json.RawMessage) json.RawMessage {
+// corruptMissingFields drops roughly half the top-level fields.
+//
+// Keys are visited in sorted order, not map order: Go randomises map iteration,
+// so iterating directly would pick a different set of fields on every run even
+// with a seeded source, and the session would not be replayable.
+func corruptMissingFields(data json.RawMessage, r *rng) json.RawMessage {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return data
 	}
 
+	keys := make([]string, 0, len(obj))
 	for k := range obj {
-		if rand.Float64() < 0.5 {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		if r.Float64() < 0.5 {
 			delete(obj, k)
 		}
 	}

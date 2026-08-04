@@ -3,7 +3,6 @@ package gremlins
 import (
 	"context"
 	"encoding/json"
-	"math/rand"
 	"strings"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
@@ -16,13 +15,17 @@ type OverflowGremlin struct {
 	SizeBytes int `json:"size_bytes"`
 	// Probability of injection (0.0–1.0).
 	Probability float64 `json:"probability"`
+	// rng is this gremlin's own seeded random source.
+	rng *rng
 }
 
 // NewOverflowGremlin creates an OverflowGremlin with the given config.
-func NewOverflowGremlin(sizeBytes int, probability float64) *OverflowGremlin {
+func NewOverflowGremlin(sizeBytes int, probability float64, opts ...Option) *OverflowGremlin {
+	o := applyOptions(opts)
 	return &OverflowGremlin{
 		SizeBytes:   sizeBytes,
 		Probability: probability,
+		rng:         newRNG(o.seed, "overflow"),
 	}
 }
 
@@ -40,7 +43,7 @@ func (g *OverflowGremlin) Inject(_ context.Context, msg *protocol.Message) (*pro
 		return msg, false, nil
 	}
 
-	if rand.Float64() >= g.Probability {
+	if g.rng.Float64() >= g.Probability {
 		return msg, false, nil
 	}
 

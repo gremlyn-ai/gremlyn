@@ -3,7 +3,6 @@ package gremlins
 import (
 	"context"
 	"encoding/json"
-	"math/rand"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
 )
@@ -15,13 +14,17 @@ type IdentityGremlin struct {
 	OverridePrompt string `json:"override_prompt"`
 	// Probability of injection (0.0–1.0).
 	Probability float64 `json:"probability"`
+	// rng is this gremlin's own seeded random source.
+	rng *rng
 }
 
 // NewIdentityGremlin creates an IdentityGremlin with the given config.
-func NewIdentityGremlin(overridePrompt string, probability float64) *IdentityGremlin {
+func NewIdentityGremlin(overridePrompt string, probability float64, opts ...Option) *IdentityGremlin {
+	o := applyOptions(opts)
 	return &IdentityGremlin{
 		OverridePrompt: overridePrompt,
 		Probability:    probability,
+		rng:            newRNG(o.seed, "identity"),
 	}
 }
 
@@ -39,7 +42,7 @@ func (g *IdentityGremlin) Inject(_ context.Context, msg *protocol.Message) (*pro
 		return msg, false, nil
 	}
 
-	if rand.Float64() >= g.Probability {
+	if g.rng.Float64() >= g.Probability {
 		return msg, false, nil
 	}
 

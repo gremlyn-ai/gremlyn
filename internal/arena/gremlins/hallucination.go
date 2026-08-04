@@ -3,7 +3,6 @@ package gremlins
 import (
 	"context"
 	"encoding/json"
-	"math/rand"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
 )
@@ -15,13 +14,17 @@ type HallucinationGremlin struct {
 	FakeToolName string `json:"fake_tool_name"`
 	// Probability of injection (0.0–1.0).
 	Probability float64 `json:"probability"`
+	// rng is this gremlin's own seeded random source.
+	rng *rng
 }
 
 // NewHallucinationGremlin creates a HallucinationGremlin with the given config.
-func NewHallucinationGremlin(fakeToolName string, probability float64) *HallucinationGremlin {
+func NewHallucinationGremlin(fakeToolName string, probability float64, opts ...Option) *HallucinationGremlin {
+	o := applyOptions(opts)
 	return &HallucinationGremlin{
 		FakeToolName: fakeToolName,
 		Probability:  probability,
+		rng:          newRNG(o.seed, "hallucination"),
 	}
 }
 
@@ -39,7 +42,7 @@ func (g *HallucinationGremlin) Inject(_ context.Context, msg *protocol.Message) 
 		return msg, false, nil
 	}
 
-	if rand.Float64() >= g.Probability {
+	if g.rng.Float64() >= g.Probability {
 		return msg, false, nil
 	}
 
