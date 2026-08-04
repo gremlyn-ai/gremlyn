@@ -23,15 +23,44 @@ type GremlinHandler struct {
 	// gremlins is an ORDERED slice, never a map or Registry.List(): map
 	// iteration order is random, and a session whose injection order varies
 	// between runs cannot be replayed, which makes its score meaningless.
-	gremlins []gremlins.Gremlin
-	sink     InjectionSink
-	logger   zerolog.Logger
-	now      func() time.Time
-	newID    func() string
+	gremlins        []gremlins.Gremlin
+	sink            InjectionSink
+	logger          zerolog.Logger
+	now             func() time.Time
+	newID           func() string
+	injectHandshake bool
+}
+
+// handshakeMethods are the protocol methods a chaos session leaves alone.
+//
+// Corrupting the handshake tests the agent's MCP *client library*, not the
+// agent's judgement, and it can stop the session from starting at all. Worse for
+// the measurement: the agent's normal next step after the handshake looks like a
+// reaction, which inflates the score and makes a robust and a fragile agent score
+// identically. The discriminance gate caught exactly that.
+//
+// Agent judgement lives in what it does with a tool result, so that is what a
+// session injects into.
+var handshakeMethods = map[string]bool{
+	"initialize":                true,
+	"notifications/initialized": true,
+	"tools/list":                true,
+	"resources/list":            true,
+	"prompts/list":              true,
+	"notifications/cancelled":   true,
+	"ping":                      true,
 }
 
 // HandlerOption configures a GremlinHandler.
 type HandlerOption func(*GremlinHandler)
+
+// WithHandshakeInjection allows gremlins to act on handshake traffic.
+//
+// Off by default. Turn it on only to test an MCP client's own robustness, and
+// know that the resulting resilience score says little about the agent.
+func WithHandshakeInjection(enabled bool) HandlerOption {
+	return func(h *GremlinHandler) { h.injectHandshake = enabled }
+}
 
 // WithClock overrides the time source. Tests use this to keep injection records
 // deterministic.
@@ -90,6 +119,10 @@ func (h *GremlinHandler) HandleMessage(ctx context.Context, msg *protocol.Messag
 		return &proxy.Decision{Action: proxy.DecisionSkip}, nil
 	}
 
+	if !h.injectHandshake && isHandshake(msg, mctx) {
+		return &proxy.Decision{Action: proxy.DecisionSkip}, nil
+	}
+
 	for _, g := range h.gremlins {
 		modified, injected, err := g.Inject(ctx, msg)
 		if err != nil {
@@ -144,6 +177,20 @@ func (h *GremlinHandler) record(name string, original, modified *protocol.Messag
 		Modified:    modified,
 	}
 	h.sink.RecordInjection(inj)
+}
+
+// isHandshake reports whether a message belongs to protocol setup rather than to
+// the agent's actual work. A response is judged by the request it answers.
+func isHandshake(msg *protocol.Message, mctx *proxy.MessageContext) bool {
+	if msg != nil && handshakeMethods[msg.GetMethod()] {
+		return true
+	}
+	if mctx != nil && mctx.CorrelatedRequest != nil {
+		return handshakeMethods[mctx.CorrelatedRequest.GetMethod()]
+	}
+	// A response the correlator could not match: without knowing what it answers
+	// we cannot call it handshake, so let the gremlins see it.
+	return false
 }
 
 // messageID returns the JSON-RPC id as a string, or "" for a notification.

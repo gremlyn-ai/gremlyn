@@ -2,11 +2,15 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/gremlyn-ai/gremlyn/internal/arena/chaos"
+	"github.com/gremlyn-ai/gremlyn/internal/arena/gremlins"
 	"github.com/gremlyn-ai/gremlyn/pkg/config"
 	"github.com/gremlyn-ai/gremlyn/pkg/models"
 	"github.com/gremlyn-ai/gremlyn/pkg/proxy"
@@ -21,6 +25,13 @@ func NewWrapCmd(logger zerolog.Logger) *cobra.Command {
 	var (
 		configPath string
 		serverName string
+
+		chaosGremlins    []string
+		chaosSeed        int64
+		chaosIntensity   string
+		chaosEventsPath  string
+		chaosSummaryPath string
+		chaosWindow      time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -56,8 +67,19 @@ All stdout output is MCP protocol traffic. Gremlyn logs go to stderr.`,
 			}()
 
 			// Load gremlyn config.
+			//
+			// A missing config is not an error unless the user named one
+			// explicitly. `gremlyn wrap -- npx some-server` has to work from any
+			// directory: it is the quickstart one-liner and the shape CI uses, and
+			// neither has run `gremlyn init`. The config only supplies env vars and
+			// a server name, both optional.
 			cfg, err := config.LoadConfig(ctx, configPath)
-			if err != nil {
+			switch {
+			case err == nil:
+			case !cmd.Flags().Changed("config") && errors.Is(err, os.ErrNotExist):
+				logger.Debug().Str("path", configPath).Msg("no config file, using defaults")
+				cfg = &config.Config{Servers: map[string]config.ServerConfig{}}
+			default:
 				return fmt.Errorf("loading config %q: %w", configPath, err)
 			}
 
@@ -84,6 +106,46 @@ All stdout output is MCP protocol traffic. Gremlyn logs go to stderr.`,
 
 			// Create pipeline and proxy.
 			pipeline := proxy.NewPipeline(logger)
+
+			// Chaos mode. In stdio MCP the agent spawns its own server, so this
+			// process — the one the agent launched — is the only place gremlins can
+			// sit in the traffic path. Whoever is scoring the session lives in
+			// another process and reads the event file we write.
+			var (
+				observer  *chaos.Observer
+				eventSink *chaos.FileEventSink
+			)
+			if len(chaosGremlins) > 0 {
+				gs, err := chaos.BuildGremlins(chaosGremlins, chaosSeed, chaos.Intensity(chaosIntensity))
+				if err != nil {
+					return fmt.Errorf("configuring chaos: %w", err)
+				}
+
+				var events chaos.EventSink
+				if chaosEventsPath != "" {
+					eventSink, err = chaos.NewFileEventSink(chaosEventsPath)
+					if err != nil {
+						return fmt.Errorf("configuring chaos events: %w", err)
+					}
+					defer func() {
+						if cerr := eventSink.Close(); cerr != nil {
+							logger.Warn().Err(cerr).Msg("closing chaos event file")
+						}
+					}()
+					events = eventSink
+				}
+
+				observer = chaos.NewObserver(events, logger, chaos.WithWindow(chaosWindow))
+				pipeline.RegisterHandler(chaos.NewGremlinHandler(gs, observer, logger))
+				pipeline.RegisterHandler(observer)
+
+				logger.Info().
+					Strs("gremlins", chaosGremlins).
+					Int64("seed", chaosSeed).
+					Str("intensity", chaosIntensity).
+					Msg("chaos mode enabled")
+			}
+
 			p, err := proxy.NewProxy(proxyCfg,
 				proxy.WithLogger(logger),
 				proxy.WithPipeline(pipeline),
@@ -97,12 +159,52 @@ All stdout output is MCP protocol traffic. Gremlyn logs go to stderr.`,
 				Str("command", childCmd[0]).
 				Msg("starting wrap proxy")
 
-			return p.Start(ctx)
+			runErr := p.Start(ctx)
+
+			// Resolve whatever is still being watched and report coverage, so the
+			// scorer can tell a fully-measured session from a truncated one.
+			if observer != nil {
+				endedNormally := runErr == nil && ctx.Err() == nil
+				cov := observer.Finalize(context.WithoutCancel(ctx), endedNormally)
+				logger.Info().
+					Int("injected", cov.Injected).
+					Int("observed", cov.Observed).
+					Int("unresolved", cov.Unresolved).
+					Bool("complete", cov.Complete()).
+					Msg("chaos session finished")
+
+				if chaosSummaryPath != "" {
+					summary := chaos.SessionSummary{
+						Coverage: cov,
+						Gremlins: chaosGremlins,
+						Seed:     chaosSeed,
+					}
+					if werr := chaos.WriteSummary(chaosSummaryPath, summary); werr != nil {
+						logger.Warn().Err(werr).Msg("writing chaos summary")
+					}
+				}
+			}
+
+			return runErr
 		},
 	}
 
 	cmd.Flags().StringVar(&configPath, "config", "gremlyn.yaml", "Path to gremlyn.yaml")
 	cmd.Flags().StringVar(&serverName, "server", "", "Server name (auto-detected from command if not set)")
+
+	cmd.Flags().StringSliceVar(&chaosGremlins, "chaos-gremlins", nil,
+		"Enable chaos mode with these gremlins, in order (e.g. corruption,latency). "+
+			"Order matters: the first gremlin to fire on a message wins")
+	cmd.Flags().Int64Var(&chaosSeed, "chaos-seed", gremlins.DefaultSeed,
+		"Seed for the gremlins. The same seed replays the same session")
+	cmd.Flags().StringVar(&chaosIntensity, "chaos-intensity", string(chaos.IntensityMedium),
+		"Injection intensity: low, medium, high or certain")
+	cmd.Flags().StringVar(&chaosEventsPath, "chaos-events", "",
+		"Append resolved arena events to this file as JSON Lines")
+	cmd.Flags().StringVar(&chaosSummaryPath, "chaos-summary", "",
+		"Write the session's coverage summary to this file as JSON")
+	cmd.Flags().DurationVar(&chaosWindow, "chaos-window", chaos.DefaultWindow,
+		"How long the agent has to react to an injection before silence is taken as the answer")
 
 	return cmd
 }

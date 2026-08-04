@@ -383,7 +383,7 @@ func TestGremlinHandler_NotificationHasNoRequestID(t *testing.T) {
 		Type: protocol.MessageTypeNotification,
 		Notification: &protocol.JSONRPCNotification{
 			JSONRPC: protocol.JSONRPCVersion,
-			Method:  "notifications/initialized",
+			Method:  "notifications/progress",
 		},
 	}
 	_, err := h.HandleMessage(context.Background(), notif, incoming())
@@ -391,7 +391,7 @@ func TestGremlinHandler_NotificationHasNoRequestID(t *testing.T) {
 
 	require.Len(t, log.Injections(), 1)
 	assert.Empty(t, log.Injections()[0].RequestID)
-	assert.Equal(t, "notifications/initialized", log.Injections()[0].Method)
+	assert.Equal(t, "notifications/progress", log.Injections()[0].Method)
 }
 
 // ── Through a real pipeline ──
@@ -479,7 +479,9 @@ func TestGremlinHandler_MutatesRealWrapTraffic(t *testing.T) {
 	  [ -n "$id" ] && printf '{"jsonrpc":"2.0","id":%s,"result":{"pristine":true}}\n' "$id"
 	done`
 
-	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n")
+	// tools/call, not tools/list: handshake traffic is deliberately left alone.
+	in := strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_graph"}}` + "\n")
 	out := &syncBuffer{}
 
 	p := proxy.NewWrapProxy(proxy.Config{

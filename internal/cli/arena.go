@@ -20,6 +20,7 @@ func NewArenaCmd(logger zerolog.Logger) *cobra.Command {
 	cmd.AddCommand(newArenaStatusCmd(logger))
 	cmd.AddCommand(newArenaSessionsCmd(logger))
 	cmd.AddCommand(newArenaGremlinsCmd(logger))
+	cmd.AddCommand(NewArenaCICmd(logger))
 
 	return cmd
 }
