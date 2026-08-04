@@ -42,7 +42,7 @@ const (
 // not a proof of anything. Its one virtue over what Arena did before is that it
 // is a function of what the agent actually did, rather than of which gremlins
 // were switched on.
-func outcomeFor(r Reaction) (models.ArenaOutcome, int) {
+func outcomeFor(r Reaction) (outcome models.ArenaOutcome, score int) {
 	switch r {
 	case ReactionRetried:
 		return models.OutcomeSurvived, 90

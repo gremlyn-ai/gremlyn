@@ -315,8 +315,9 @@ func TestObserver_ResolutionIsDeterministic(t *testing.T) {
 		_, _ = o.HandleMessage(context.Background(), callTool(11, "read_graph"), outgoing())
 		o.Finalize(context.Background(), true)
 
-		var out []string
-		for _, e := range ev.all() {
+		all := ev.all()
+		out := make([]string, 0, len(all))
+		for _, e := range all {
 			var d map[string]string
 			_ = json.Unmarshal(e.Details, &d)
 			out = append(out, e.ID+":"+d["reaction"])
