@@ -116,11 +116,24 @@ Ordre de priorité :
 
 ## P2 — Mode CI
 
-### P2.0 — Valider le contrat agent headless · taille S · ← GATE
+### P2.0 — Valider le contrat agent headless · ✅ GATE PASSÉ
 
-Le mode CI exige un **agent lançable en headless**. La plupart ne le sont pas.
+Validé contre un agent MCP réel : **Claude Code**.
 
-Tester le contrat contre 2-3 frameworks réels (SDK Anthropic, LangChain, un custom) **avant** d'écrire l'Action. Si aucun ne se scripte facilement, le mode CI n'a pas de marché — mieux vaut le découvrir maintenant qu'après.
+```bash
+claude -p "<prompt>" --mcp-config mcp.json --output-format json --max-turns 1
+```
+
+Avec `mcp.json` pointant `command` sur `gremlyn wrap -- <serveur MCP>`. Vérifié par instrumentation : **l'agent spawne bien le proxy** (log de spawn confirmé). Le contrat `agent.command` de P2.1 tient.
+
+Flags disponibles et pertinents : `-p/--print`, `--mcp-config`, `--output-format json|stream-json`, `--allowed-tools`, `--permission-mode`, `--max-turns`, `--input-format`.
+
+**⚠️ Piège trouvé, à traiter en P2.1.** Lors de la première sonde, l'agent a tourné, retourné `is_error: false` et un exit 0 — **sans jamais appeler l'outil**. Un agent qui n'appelle aucun outil traverse zéro gremlin et sortirait donc avec un score « résilient » parfait alors que rien n'a été testé.
+
+Conséquence de design, non négociable pour `arena ci` :
+> **Une session sans appel d'outil est un échec de session, pas un succès.** Le harness doit vérifier qu'au moins un gremlin a effectivement été traversé, et sortir en erreur sinon. Sans ça, la CI rend un vert qui ne veut rien dire — exactement le défaut que P0 corrige côté score.
+
+**Conséquence pour P0.3.** Un agent LLM réel est non déterministe et coûteux (les deux sondes : ~0,58 $). Un gate de mesure a besoin de comportements **reproductibles** : la validation de discriminance utilise un agent de référence scripté (robuste vs fragile), pas un LLM. Les agents réels servent à valider le *contrat*, pas à calibrer le *score*.
 
 ### P2.1 — `arena ci` en process · taille M
 
@@ -169,13 +182,13 @@ Composite action : télécharge le binaire (ou image Docker), lance la commande,
 ```
 P0.0    fusion monorepo                 S   ✅ fait
 P0.0bis framing MCP + teardown proxy    M   ✅ fait (wrap fonctionne enfin)
-P0.1    GremlinHandler → pipeline       S   ⏳ suivant
-P0.2    ObserverHandler → outcome réel  M   ← le vrai travail
+P0.1    GremlinHandler → pipeline       S   ✅ fait
+P0.2    ObserverHandler → outcome réel  M   ⏳ en cours ← le vrai travail
 P0.3    validation discriminance        S   ← GATE
 ─────────────────────────────────────────────────────
 P1      GoReleaser + go install + brew  S   → publiable
 ─────────────────────────────────────────────────────
-P2.0    valider contrat agent headless  S   ← GATE
+P2.0    valider contrat agent headless  S   ✅ GATE PASSÉ
 P2.1    arena ci en process             M
 P2.2    GitHub Action                   S
 ```
