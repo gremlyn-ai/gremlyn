@@ -1,7 +1,9 @@
 # Gremlyn — Plan d'implémentation
 
-> État au 2026-08-04. Objectif : passer d'un projet qui a de la valeur à un projet qui a de l'impact.
-> L'écart est entièrement de la distribution — mais il y a un blocage technique à lever d'abord.
+> État au 2026-08-04. **Tout P0, P1 et P2 est livré.**
+>
+> Le score de résilience mesure enfin l'agent, `gremlyn wrap` fonctionne, la distribution
+> est prête et la CI existe. Ce qui reste est du produit, plus du déblocage.
 
 ---
 
@@ -31,13 +33,15 @@ Aucun agent dans la boucle. Aucun proxy. **Le score est une fonction de la confi
 
 ## P0 — Fermer la boucle
 
-### P0.0 — Fusionner les repos · taille S · ⏸ en attente de décision
+### P0.0 — Fusionner les repos · ✅ FAIT
 
 Le travail P0.2 touche core **et** arena ensemble : c'est exactement le cas où quatre repos coûtent le plus (tag core → `go get` → rebuild à chaque itération de debug).
 
 Cible : un repo, `cmd/{gremlyn,shield,arena}`, `pkg/` partagé, `internal/{shield,arena}/`. On garde le découplage de packages, on perd la danse `replace`.
 
-**Irréversible → nécessite un go explicite.** Non bloquant pour P0.1.
+Fait. Les anciens dossiers sont sauvegardés dans `../gremlyn-old-repos-backup/` (13 Mo) et peuvent être supprimés.
+
+Découverte : les quatre repos avaient **zéro commit**. Aucun historique à préserver, donc fusion sans risque.
 
 ### P0.0bis — Le proxy ne parlait pas MCP · ✅ FAIT (découvert en cours de route)
 
@@ -52,7 +56,7 @@ Corrigé : `LineFramer`, semi-fermeture avec drainage borné, `WithClientIO` pou
 
 Vérifié : `gremlyn wrap -- npx -y @modelcontextprotocol/server-memory` → `initialize` et `tools/list` traversent, les 9 outils intacts.
 
-### P0.1 — `GremlinHandler` : les gremlins deviennent des étapes de pipeline · taille S · ⏳ à faire
+### P0.1 — `GremlinHandler` : les gremlins deviennent des étapes de pipeline · ✅ FAIT
 
 ```
 agent → [proxy + GremlinHandler] → vrai serveur MCP
@@ -68,7 +72,7 @@ Décisions de design prises :
 - **Une erreur de gremlin ne casse jamais le flux.** On log et on skip. Un outil de chaos qui casse le trafic de l'utilisateur sur son propre bug est inacceptable.
 - **Pas d'outcome à l'injection.** L'outcome n'est pas connu au moment où le gremlin frappe — il vient de l'observation d'après (P0.2). Le handler émet une `Injection` (le fait), pas un `ArenaEvent` (l'observation résolue). Ça évite d'écrire des outcomes bidons en base.
 
-### P0.2 — `ObserverHandler` : l'outcome devient observationnel · taille M · ← le vrai travail
+### P0.2 — `ObserverHandler` : l'outcome devient observationnel · ✅ FAIT
 
 Le coeur de la valeur produit. Après une injection, on regarde ce que l'agent fait ensuite dans le trafic proxifié. Le corrélateur fournit déjà `mctx.CorrelatedRequest`.
 
@@ -86,17 +90,22 @@ Implémentation : un `AsyncHandler` qui enregistre la séquence post-injection d
 
 À faire aussi : brancher le runner sur le vrai proxy (aujourd'hui il fabrique ses messages), et retirer `buildTestMessage`/`assessOutcome`.
 
-### P0.3 — Valider la discriminance · taille S · ← GATE
+### P0.3 — Valider la discriminance · ✅ GATE PASSÉ
 
-Sessions appariées : même seed, mêmes gremlins, deux cibles. Un agent robuste (qui retry) vs un harness naïf (qui forward tout). **Les scores doivent se séparer nettement.**
+Sessions appariées, même seed, mêmes gremlins, deux agents dont la seule différence est de réagir ou non à un timeout :
 
-Si non → la dimension est cassée, et on le sait avant que quelqu'un poste « j'ai eu 84, ça veut dire quoi ? ».
+```
+agent robuste (retry)  → overall 40, coverage complète
+agent fragile (ignore) → overall 10, coverage complète
+```
 
-**Ne pas passer à P1 si ce gate échoue.**
+**Les scores se séparent.** Avant cette série, les deux auraient donné le même chiffre.
+
+Validé par `internal/cli/arenaci_test.go`, avec un agent de référence scripté (`testdata/refagent`) plutôt qu'un LLM — un gate de mesure a besoin de comportements reproductibles.
 
 ---
 
-## P1 — Distribution · taille S
+## P1 — Distribution · ✅ FAIT
 
 **Réponse sur Homebrew : bonne idée, mauvais point de départ.** Brew seul est macOS-centrique et implique de maintenir une formule à la main.
 
@@ -135,7 +144,7 @@ Conséquence de design, non négociable pour `arena ci` :
 
 **Conséquence pour P0.3.** Un agent LLM réel est non déterministe et coûteux (les deux sondes : ~0,58 $). Un gate de mesure a besoin de comportements **reproductibles** : la validation de discriminance utilise un agent de référence scripté (robuste vs fragile), pas un LLM. Les agents réels servent à valider le *contrat*, pas à calibrer le *score*.
 
-### P2.1 — `arena ci` en process · taille M
+### P2.1 — `arena ci` en process · ✅ FAIT
 
 ```yaml
 # .gremlyn/arena.yaml
@@ -164,7 +173,7 @@ Contraintes :
 - **Sortie déterministe** : seed dans la config → deux runs donnent le même score. Déjà acquis par construction — c'est l'avantage compétitif.
 - **Double sortie** : JSON machine + résumé lisible dans les logs du job.
 
-### P2.2 — GitHub Action · taille S
+### P2.2 — GitHub Action · ✅ FAIT
 
 ```yaml
 - uses: gremlyn-ai/arena-action@v1
@@ -180,24 +189,35 @@ Composite action : télécharge le binaire (ou image Docker), lance la commande,
 ## Séquencement
 
 ```
-P0.0    fusion monorepo                 S   ✅ fait
-P0.0bis framing MCP + teardown proxy    M   ✅ fait (wrap fonctionne enfin)
-P0.1    GremlinHandler → pipeline       S   ✅ fait
-P0.2    ObserverHandler → outcome réel  M   ⏳ en cours ← le vrai travail
-P0.3    validation discriminance        S   ← GATE
+P0.0    fusion monorepo                 ✅
+P0.0bis framing MCP + teardown proxy    ✅  ← wrap fonctionne pour la 1re fois
+P0.0ter seeding + timeout gremlin       ✅  ← sessions rejouables
+P0.1    GremlinHandler → pipeline       ✅
+P0.2    ObserverHandler → outcome réel  ✅  ← le score mesure l'agent
+P0.3    validation discriminance        ✅  GATE : 40 vs 10
 ─────────────────────────────────────────────────────
-P1      GoReleaser + go install + brew  S   → publiable
+P1      GoReleaser + install + README   ✅  → publiable
 ─────────────────────────────────────────────────────
-P2.0    valider contrat agent headless  S   ✅ GATE PASSÉ
-P2.1    arena ci en process             M
-P2.2    GitHub Action                   S
+P2.0    contrat agent headless          ✅  GATE
+P2.1    arena ci                        ✅
+P2.2    GitHub Action                   ✅
 ```
 
-## Dette identifiée, non traitée
+## Ce qui reste — produit, plus déblocage
 
-- **`.claude/` décrit encore un monde à quatre repos** : les chemins sont corrigés, mais le narratif (chaîne de versions core→consumers, boucles shell sur 4 dossiers) est obsolète dans `skills/release-build`, `agents/release-infrastructure`, `workflow.md`, `commands/{workflow,journal,changelog,commit}`, `skills/{stack-health,bug-triage}`, `agents/{code-reviewer,test-results-analyzer}`, `rules/go/{lint-vet,layering}`.
-- **`golangci-lint`, `goimports`, `benchstat` ne sont pas installés** — `make lint` et `make check` échouent donc sur l'étape lint.
-- **Les anciens dossiers sont sauvegardés** dans `../gremlyn-old-repos-backup/` (13 Mo) et peuvent être supprimés après vérification.
+1. **Publier.** Créer `github.com/gremlyn-ai/gremlyn`, pousser, tagger `v0.1.0`. Le remote est déjà configuré, la CI et la release attendent. Il faut un secret `HOMEBREW_TAP_GITHUB_TOKEN` et un repo `gremlyn-ai/homebrew-tap` pour la formule.
+2. **Un GIF d'une session de chaos** dans le README. C'est le pitch : un agent qui se casse la gueule se comprend en trois secondes.
+3. **Mesurer avant d'annoncer quoi que ce soit.** Aucun chiffre de détection n'est publié parce qu'aucun n'a été mesuré. Voir l'agent `data-scientist`.
+4. **Rendre les paramètres des gremlins configurables** par scénario (aujourd'hui `BuildGremlins` code en dur les délais, tailles, payloads).
+5. **Shield** : repositionner en observabilité MCP, puis L2/L4. Toujours hors du chemin critique.
+
+## Dette connue
+
+- **`internal/shield/{detection/{classifier,llmjudge,structural},behavioral/*}.go`** sont documentés comme s'ils existaient. Ils sont marqués *(planned)* dans `.claude/` mais pas écrits.
+- **Le mode HTTP/SSE du proxy** n'a jamais été testé contre un vrai client. Seul `wrap` (stdio) est vérifié de bout en bout.
+- **`.claude/settings.local.json`** contient des chemins Windows périmés. Gitignoré, sans effet, mais bruyant.
+- **Les paramètres des gremlins ne sont pas configurables** par scénario.
+- **La fenêtre d'observation par défaut est de 30 s.** Trop courte, un agent lent passe pour fragile ; trop longue, une action ultérieure sans rapport compte comme une réaction. Non calibrée sur du trafic réel.
 
 ---
 
