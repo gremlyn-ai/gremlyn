@@ -120,6 +120,12 @@ steps:
       config: .gremlyn/arena.yaml
 ```
 
+<p align="center">
+  <img src="docs/demo/pr-check.gif" alt="The Gremlyn check and comment on a pull request" width="88%">
+  <br>
+  <sub>The check on a real pull request of this repository.</sub>
+</p>
+
 The check's title reads like `1 of 4 scenarios below threshold · 1 regression vs base`.
 Its body, rendered from the real run above:
 
