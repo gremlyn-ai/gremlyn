@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+if [ "${GREMLYN_FORCE_DOWNLOAD:-0}" != "1" ] && command -v gremlyn >/dev/null 2>&1; then
+  exec gremlyn "$@"
+fi
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+data="${CLAUDE_PLUGIN_DATA:-${HOME}/.gremlyn/plugin}"
+bin="$data/bin/gremlyn"
+
+if [ ! -x "$bin" ]; then
+  version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$root/.claude-plugin/plugin.json" | head -1)
+  [ -n "$version" ] || { echo "gremlyn plugin: cannot read the plugin version" >&2; exit 1; }
+  echo "gremlyn plugin: installing gremlyn v$version into $data/bin (first run only)" >&2
+  GREMLYN_VERSION="v$version" GREMLYN_BIN_DIR="$data/bin" sh "$root/install.sh" >&2
+fi
+
+exec "$bin" "$@"

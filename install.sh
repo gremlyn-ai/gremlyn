@@ -1,11 +1,4 @@
 #!/bin/sh
-# Gremlyn installer.
-#
-#   curl -fsSL https://raw.githubusercontent.com/gremlyn-ai/gremlyn/main/install.sh | sh
-#
-# Downloads the latest release for this platform, verifies its checksum, and
-# installs it. Set GREMLYN_VERSION to pin a version, GREMLYN_BIN_DIR to change the
-# destination.
 set -eu
 
 REPO="gremlyn-ai/gremlyn"
@@ -55,34 +48,52 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 say "Downloading gremlyn $version ($os/$arch)…"
 $DL "$tmp/$archive" "$base/$archive" || die "download failed: $base/$archive"
 
-# Verifying the checksum is the point of shipping them. A security tool installed
-# from an unverified download is a contradiction.
-if $DL "$tmp/checksums.txt" "$base/checksums.txt" 2>/dev/null; then
+if [ "${GREMLYN_SKIP_VERIFY:-0}" = "1" ]; then
+  say "WARNING: GREMLYN_SKIP_VERIFY=1 — installing without verifying the download."
+else
+  $DL "$tmp/checksums.txt" "$base/checksums.txt" \
+    || die "could not download checksums.txt; refusing to install an unverified binary"
+
+  if command -v cosign >/dev/null 2>&1; then
+    if $DL "$tmp/checksums.txt.sig" "$base/checksums.txt.sig" \
+       && $DL "$tmp/checksums.txt.pem" "$base/checksums.txt.pem"; then
+      cosign verify-blob "$tmp/checksums.txt" \
+        --signature "$tmp/checksums.txt.sig" \
+        --certificate "$tmp/checksums.txt.pem" \
+        --certificate-identity-regexp "^https://github.com/${REPO}/" \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+        >/dev/null 2>&1 \
+        || die "SIGNATURE verification FAILED for checksums.txt — refusing to install"
+      say "Signature verified (cosign)."
+    else
+      say "NOTE: no signature published for this release; verifying the checksum only."
+    fi
+  else
+    say "NOTE: cosign not found; verifying the checksum only. Install cosign to verify"
+    say "      that the checksum manifest was really published by the release workflow."
+  fi
+
   if command -v sha256sum >/dev/null 2>&1; then
     (cd "$tmp" && sha256sum -c checksums.txt --ignore-missing) || die "checksum verification FAILED"
-    say "Checksum verified."
   elif command -v shasum >/dev/null 2>&1; then
     want=$(grep " $archive\$" "$tmp/checksums.txt" | cut -d' ' -f1)
+    [ -n "$want" ] || die "no checksum entry for $archive; refusing to install"
     got=$(shasum -a 256 "$tmp/$archive" | cut -d' ' -f1)
     [ "$want" = "$got" ] || die "checksum verification FAILED"
-    say "Checksum verified."
   else
-    say "WARNING: no sha256 tool found, skipping verification."
+    die "no sha256 tool available (need sha256sum or shasum); refusing to install unverified"
   fi
-else
-  say "WARNING: could not download checksums.txt, skipping verification."
+  say "Checksum verified."
 fi
 
 need tar
 tar -xzf "$tmp/$archive" -C "$tmp"
 mkdir -p "$BIN_DIR"
-for b in gremlyn shield arena; do
-  [ -f "$tmp/$b" ] || continue
-  install -m 0755 "$tmp/$b" "$BIN_DIR/$b" 2>/dev/null || {
-    cp "$tmp/$b" "$BIN_DIR/$b" && chmod 0755 "$BIN_DIR/$b"
-  }
-  say "Installed $BIN_DIR/$b"
-done
+[ -f "$tmp/gremlyn" ] || die "the archive does not contain a gremlyn binary"
+install -m 0755 "$tmp/gremlyn" "$BIN_DIR/gremlyn" 2>/dev/null || {
+  cp "$tmp/gremlyn" "$BIN_DIR/gremlyn" && chmod 0755 "$BIN_DIR/gremlyn"
+}
+say "Installed $BIN_DIR/gremlyn"
 
 say ""
 "$BIN_DIR/gremlyn" version || true
@@ -91,4 +102,4 @@ case ":$PATH:" in
   *) say ""; say "$BIN_DIR is not on your PATH. Add it:"; say "  export PATH=\"\$PATH:$BIN_DIR\"" ;;
 esac
 say ""
-say "Try it:  gremlyn wrap -- npx -y @modelcontextprotocol/server-memory"
+say "Next:  gremlyn arena ci --config .gremlyn/arena.yaml"

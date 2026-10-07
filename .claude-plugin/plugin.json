@@ -1,0 +1,10 @@
+{
+  "name": "gremlyn",
+  "version": "0.1.0",
+  "description": "Chaos testing for AI agents. Injects controlled failures into an agent's MCP tools, scores how it reacts, and helps fix the code that broke.",
+  "author": { "name": "gremlyn-ai" },
+  "homepage": "https://github.com/gremlyn-ai/gremlyn",
+  "repository": "https://github.com/gremlyn-ai/gremlyn",
+  "license": "MIT",
+  "keywords": ["chaos-engineering", "mcp", "agents", "resilience", "testing"]
+}

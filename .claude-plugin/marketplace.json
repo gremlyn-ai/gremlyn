@@ -1,0 +1,14 @@
+{
+  "name": "gremlyn",
+  "owner": {
+    "name": "gremlyn-ai"
+  },
+  "description": "Chaos testing for AI agents that use MCP tools.",
+  "plugins": [
+    {
+      "name": "gremlyn",
+      "source": ".",
+      "description": "Break your AI agent on purpose: inject MCP tool failures, score how it copes, then fix the code that failed."
+    }
+  ]
+}
