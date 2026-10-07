@@ -170,7 +170,7 @@ func renderMarkdown(w io.Writer, cur, base *CIResult) {
 		observed += cur.Scenarios[i].Coverage.Observed
 	}
 
-	_, _ = fmt.Fprintf(w, "## 🧪 Gremlyn: agent resilience\n\n")
+	_, _ = fmt.Fprintf(w, "## <img src=\"https://raw.githubusercontent.com/gremlyn-ai/gremlyn/main/docs/assets/gremlyn-icon.png\" width=\"24\" height=\"24\" align=\"top\" alt=\"\"> Gremlyn: agent resilience\n\n")
 	_, _ = fmt.Fprintf(w, "**%s** · %d of %d injected failures observed\n\n",
 		reportTitle(cur, base), observed, injected)
 
