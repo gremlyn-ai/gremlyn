@@ -1,53 +1,91 @@
 # Gremlyn Arena — GitHub Action
 
-Inject controlled failures into your AI agent's MCP tools on every pull request,
-and fail the build when it gets less resilient.
+Breaks your AI agent on purpose on every pull request, and reports how it copes:
+
+- a **"Gremlyn" check** on the PR, with the verdict in its title, the full report in the
+  Checks tab, and an annotation on the config line of each failing scenario;
+- **one PR comment**, updated in place on every push;
+- the same report in the **job summary**, plus the JSON report as an artifact.
+
+A ready-to-copy workflow is in [`examples/workflows/gremlyn.yml`](../examples/workflows/gremlyn.yml):
 
 ```yaml
-name: Agent resilience
-
-on: pull_request
+name: Gremlyn
+on:
+  pull_request:
+  push:
+    branches: [main]   # the run on main is the baseline PRs are compared with
 
 permissions:
   contents: read
-  pull-requests: write   # only needed for comment-on-pr
+  actions: read        # download the baseline report
+  checks: write        # publish the Gremlyn check
+  pull-requests: write # comment on the PR
 
 jobs:
   arena:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: gremlyn-ai/gremlyn/action@v1
+      # ...whatever your agent needs to run, and its API key...
+      - uses: gremlyn-ai/gremlyn/action@v0.1.0
         with:
           config: .gremlyn/arena.yaml
-          min-score: 70
 ```
 
-## Adopting this on an existing project
+## Report first, gate later
 
-Start without the gate. Get a few runs of real data before you pick a number,
-because a threshold chosen by guessing will either never fire or fire constantly,
-and a check that cries wolf gets deleted.
+By default the action **reports and does not block**. A missed threshold makes the check
+*neutral*, not red. An LLM agent is not deterministic: the same scenario can score
+differently on two runs, and a gate on a single run turns into a flaky check that people
+disable. Watch the delta against `main` for a while, then set `fail-on-threshold: "true"`:
+the check turns red and the job fails when a threshold is missed.
 
-```yaml
-      - uses: gremlyn-ai/gremlyn/action@v1
-        with:
-          fail-on-threshold: false   # report the score, don't block
+## What the check says
+
+The title is a one-line verdict, for example:
+
+```text
+1 of 3 scenarios below threshold · 1 regression vs base
 ```
 
-The score still appears in the job summary and as a PR comment. Turn the gate on
-once you know what your agent normally scores.
+The report shows one row per scenario. Then, for each failing one, what the agent did and
+what is usually missing in its code:
+
+| | Scenario | Gremlins | Score | Δ vs base | Measured |
+|---|---|---|---:|---:|---|
+| ❌ | corrupted-result | corruption | **10** critical | 📉 -80 | 1/1 |
+| ✅ | injected-instructions | injection | 90 excellent | = | 1/1 |
+| ⚠️ | new-scenario | timeout | not measured | new | 0/0 |
+
+- **Measured** is `observed/injected`. A `0/0` scenario never called a tool, so nothing was
+  tested. It shows ⚠️, as a setup problem, and never as a score.
+- **📉** marks a drop of 10 points or more against the base branch. Smaller moves are within
+  normal run-to-run variation.
+
+Render the same report locally with `gremlyn arena report report.json --baseline base.json`.
+
+## Fixing what it found
+
+Run `/gremlyn:chaos-test` in Claude Code with the gremlyn plugin installed. To automate it,
+[`examples/workflows/gremlyn-fix.yml`](../examples/workflows/gremlyn-fix.yml) runs the skill
+unattended when a maintainer labels a PR `gremlyn-fix`, and opens a second PR with the fixes.
 
 ## Inputs
 
 | Input | Default | Description |
 |---|---|---|
 | `config` | `.gremlyn/arena.yaml` | Scenario config |
-| `version` | `latest` | Gremlyn version to install |
-| `min-score` | — | Overrides `thresholds.min_overall`, so a workflow can tighten the bar without editing the config |
+| `version` | `latest` | Gremlyn version to install, or `path` to use a `gremlyn` already on `PATH` |
+| `min-score` | — | Overrides `thresholds.min_overall` without editing the config |
 | `report` | `gremlyn-report.json` | Where the JSON report is written |
-| `comment-on-pr` | `true` | Post the result as a PR comment, updating it in place rather than adding one per push |
-| `fail-on-threshold` | `true` | Set `false` to report without gating |
+| `check-run` | `true` | Publish the "Gremlyn" check; needs `checks: write` |
+| `comment-on-pr` | `true` | Post and update the PR comment; needs `pull-requests: write` |
+| `baseline` | — | A previous report to compare with. Empty: the last successful run of this workflow on the base branch; needs `actions: read` |
+| `fail-on-threshold` | `false` | Fail the job, and make the check red, when a threshold is missed |
+| `github-token` | `github.token` | Token for the baseline, the check and the comment |
+
+A missing permission never fails the job. The action logs a notice and skips that output.
 
 ## Outputs
 
@@ -55,40 +93,18 @@ once you know what your agent normally scores.
 |---|---|
 | `passed` | `true` when every scenario met its thresholds |
 | `score` | Lowest overall resilience score across scenarios |
+| `title` | The one-line verdict |
 | `report` | Path to the JSON report |
 
-The report is always uploaded as an artifact, including on failure — the event log
-is where you look to find out *why* a score dropped.
+## Under the hood
 
-## Reading the result
+The action installs `gremlyn` and verifies the release before running it. It checks the
+cosign signature when cosign is on the runner, and always checks the checksum. Then it calls
+`gremlyn arena ci`. That command launches your agent headlessly, once per scenario, with its
+MCP server behind the gremlyn proxy, and scores how the agent reacts to each injected
+failure. No service and no database are involved: everything happens inside the job.
 
-```
-| Scenario           | Score | Grade | Coverage | Status |
-|--------------------|------:|-------|----------|--------|
-| unresponsive-tool  |    40 | D     | 2/2      | ✅     |
-| corrupted-result   |    10 | F     | 1/1      | ❌     |
-```
-
-**Coverage is the column to read first.** It is `observed/injected`. A scenario
-showing `0/0` injected nothing, which means the agent never called a tool and
-nothing was tested — that fails rather than passing, because a green check that
-tested nothing is worse than no check.
-
-## What it does under the hood
-
-The action installs `gremlyn`, **verifies the release checksum** before running it,
-and calls `gremlyn arena ci`. That command launches your agent headlessly with its
-MCP server proxied through gremlyn in chaos mode, watches how the agent reacts to
-each injected failure, and scores it.
-
-No service and no database are involved. Everything happens inside the job.
-
-## Requirements
-
-Your agent must be launchable headlessly, and its MCP servers must be
-configurable. In practice that means the `agent.command` in your config contains
-`{{mcp_config}}` — the action refuses a config without it, because an agent that
-keeps its own MCP servers never crosses a gremlin and the run would measure
-nothing while appearing to pass.
-
-See the [main README](../README.md) for the config format.
+Your agent must be launchable headlessly and accept an MCP config path. In practice,
+`agent.command` contains `{{mcp_config}}`. The action refuses a config without it, because
+an agent that keeps its own MCP servers never crosses a gremlin. See the
+[main README](../README.md) for the config format.

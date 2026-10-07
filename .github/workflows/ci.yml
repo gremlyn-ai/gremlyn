@@ -20,47 +20,41 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
       - run: go vet ./...
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84
         with:
-          version: latest
+          version: "v2.12.2"
 
   test:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      # -race is mandatory, not optional. The proxy is full duplex and Arena runs
-      # concurrent sessions; a non-race run proves very little here, and a data
-      # race on a policy decision is a security bug rather than a flake.
       - name: go test -race
         run: go test -race -count=1 ./... -coverprofile=coverage.out
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: coverage
           path: coverage.out
 
-  # Guards the property the whole distribution depends on: pure-Go SQLite is why
-  # these binaries are static and cross-compile without a per-target toolchain.
-  # A CGO dependency would break every release target at once.
   cgo-free:
     name: CGO_ENABLED=0
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -79,8 +73,8 @@ jobs:
           - { goos: darwin, goarch: arm64 }
           - { goos: windows, goarch: amd64 }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -90,19 +84,16 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: go build ./...
 
-  # The only check that proves the product works. Everything else can be green
-  # while `gremlyn wrap` fails to speak MCP — which is exactly what happened
-  # before the framing fix, for as long as the suite only covered constructors.
   e2e:
     name: End to end against a real MCP server
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22"
 
@@ -146,23 +137,25 @@ jobs:
           print('coverage OK:', s)
           "
 
-  dashboard:
-    name: Dashboard
+  dependency-review:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: dashboard
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: dashboard/package-lock.json
-      # npm ci, never npm install: the lockfile is the contract.
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npx vitest run
-      # A dev server that renders while the build fails is a common Next.js gap.
-      - run: npm run build
+          fail-on-severity: high
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: "$(go env GOPATH)/bin/govulncheck ./..."

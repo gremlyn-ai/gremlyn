@@ -8,9 +8,6 @@ before:
     - go vet ./...
 
 builds:
-  # CGO_ENABLED=0 everywhere. Storage uses modernc.org/sqlite (pure Go) precisely
-  # so these binaries are static and cross-compile without a toolchain per target.
-  # A CGO dependency would break this whole matrix.
   - id: gremlyn
     main: ./cmd/gremlyn
     binary: gremlyn
@@ -22,35 +19,6 @@ builds:
         goarch: arm64
     flags: [-trimpath]
     ldflags:
-      # These paths must stay in sync with internal/cli/version.go. Pointing them
-      # at main.* silently ships a binary reporting "dev", which is unsupportable
-      # in the field.
-      - -s -w
-      - -X github.com/gremlyn-ai/gremlyn/internal/cli.Version={{.Version}}
-      - -X github.com/gremlyn-ai/gremlyn/internal/cli.Commit={{.ShortCommit}}
-      - -X github.com/gremlyn-ai/gremlyn/internal/cli.BuildDate={{.Date}}
-
-  - id: shield
-    main: ./cmd/shield
-    binary: shield
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    flags: [-trimpath]
-    ldflags:
-      - -s -w
-      - -X github.com/gremlyn-ai/gremlyn/internal/cli.Version={{.Version}}
-      - -X github.com/gremlyn-ai/gremlyn/internal/cli.Commit={{.ShortCommit}}
-      - -X github.com/gremlyn-ai/gremlyn/internal/cli.BuildDate={{.Date}}
-
-  - id: arena
-    main: ./cmd/arena
-    binary: arena
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    flags: [-trimpath]
-    ldflags:
       - -s -w
       - -X github.com/gremlyn-ai/gremlyn/internal/cli.Version={{.Version}}
       - -X github.com/gremlyn-ai/gremlyn/internal/cli.Commit={{.ShortCommit}}
@@ -58,7 +26,7 @@ builds:
 
 archives:
   - id: default
-    ids: [gremlyn, shield, arena]
+    ids: [gremlyn]
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     format_overrides:
@@ -68,10 +36,21 @@ archives:
       - README.md
       - LICENSE*
 
-# A security tool shipping unverifiable binaries is not shippable.
 checksum:
   name_template: checksums.txt
   algorithm: sha256
+
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
 
 sboms:
   - artifacts: archive
@@ -84,60 +63,32 @@ changelog:
   use: github
   groups:
     - title: Breaking changes
-      regexp: '(?i)^.*!:|BREAKING'
+      regexp: '(?i)^\W*\w+(\([^)]*\))?!:|BREAKING'
       order: 0
     - title: Features
-      regexp: '(?i)^feat'
+      regexp: '(?i)^\W*feat'
       order: 1
     - title: Fixes
-      regexp: '(?i)^fix'
+      regexp: '(?i)^\W*fix'
       order: 2
     - title: Performance
-      regexp: '(?i)^perf'
+      regexp: '(?i)^\W*perf'
       order: 3
     - title: Other
       order: 99
   filters:
     exclude:
-      - '(?i)^docs'
-      - '(?i)^test'
-      - '(?i)^style'
-      - '(?i)^chore\(deps\)'
+      - '(?i)^\W*docs'
+      - '(?i)^\W*test'
+      - '(?i)^\W*style'
+      - '(?i)^\W*chore\(deps\)'
       - Merge pull request
       - Merge branch
-
-# The Homebrew formula is generated, not maintained by hand. That is the whole
-# reason to reach for GoReleaser rather than a tap as a separate project.
-homebrew_casks:
-  - name: gremlyn
-    ids: [default]
-    repository:
-      owner: gremlyn-ai
-      name: homebrew-tap
-    homepage: https://github.com/gremlyn-ai/gremlyn
-    description: Break your AI agent on purpose, before production does it for you
-
-dockers_v2:
-  - id: gremlyn
-    ids: [gremlyn]
-    images:
-      - ghcr.io/gremlyn-ai/gremlyn
-    tags:
-      - "{{ .Version }}"
-      - latest
-    dockerfile: Dockerfile
-    platforms: [linux/amd64, linux/arm64]
-    labels:
-      org.opencontainers.image.title: "{{ .ProjectName }}"
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.revision: "{{ .FullCommit }}"
-      org.opencontainers.image.source: https://github.com/gremlyn-ai/gremlyn
 
 release:
   draft: false
   prerelease: auto
   footer: |
-    ## Install
 
     ```bash
     go install github.com/gremlyn-ai/gremlyn/cmd/gremlyn@{{ .Tag }}

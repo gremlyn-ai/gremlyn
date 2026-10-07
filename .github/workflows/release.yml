@@ -6,50 +6,41 @@ on:
 
 permissions:
   contents: write
-  packages: write
   id-token: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          fetch-depth: 0 # GoReleaser needs the full history for the changelog
+          fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: "1.26"
           cache: true
 
-      # Never release something that has not passed the gate. A tag is permanent:
-      # the Go module proxy caches a version forever, so a bad release cannot be
-      # replaced, only superseded.
       - name: Gate
         run: |
           go vet ./...
           go test -race -count=1 ./...
           CGO_ENABLED=0 go build ./...
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac
+
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a
         with:
-          version: latest
+          version: "v2.17.1"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # A separate token is needed to push the generated formula to the tap.
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
-      # A downloadable artifact that cannot wrap an MCP server is a broken
-      # release, regardless of what the build said.
       - name: Verify the published binary
         run: |
           set -euo pipefail
@@ -58,7 +49,23 @@ jobs:
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}"
           curl -fsSL -o g.tar.gz "${base}/gremlyn_${num}_linux_amd64.tar.gz"
           curl -fsSL -o checksums.txt "${base}/checksums.txt"
+          curl -fsSL -o checksums.txt.sig "${base}/checksums.txt.sig"
+          curl -fsSL -o checksums.txt.pem "${base}/checksums.txt.pem"
+
+          cosign verify-blob checksums.txt \
+            --signature checksums.txt.sig \
+            --certificate checksums.txt.pem \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
           sha256sum -c checksums.txt --ignore-missing
           tar -xzf g.tar.gz
           ./gremlyn version
-          ./gremlyn doctor || true
+          ./gremlyn arena list-gremlins
+
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt

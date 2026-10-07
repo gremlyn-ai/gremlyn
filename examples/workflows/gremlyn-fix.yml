@@ -1,0 +1,66 @@
+name: Gremlyn fix
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  fix:
+    if: github.event.label.name == 'gremlyn-fix'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+
+      - name: Install Claude Code and the gremlyn plugin
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin marketplace add gremlyn-ai/gremlyn
+          claude plugin install gremlyn@gremlyn
+
+      - name: Run the fix loop, unattended
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "/gremlyn:chaos-test --apply" \
+            --allowedTools "Bash Read Write Edit Glob Grep" \
+            --strict-mcp-config --max-turns 60 > "$RUNNER_TEMP/fix.md"
+
+      - name: Open a pull request with the fixes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.head.ref }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+            echo "Nothing to fix."
+            exit 0
+          fi
+
+          warn=""
+          if git ls-files --error-unmatch .gremlyn/arena.yaml >/dev/null 2>&1 \
+             && ! git diff --quiet -- .gremlyn/arena.yaml; then
+            warn=$'> [!WARNING]\n> This change edits `.gremlyn/arena.yaml`. Check that no threshold was lowered and no scenario removed.\n\n'
+          fi
+
+          branch="gremlyn/fix-$PR"
+          git config user.name "gremlyn[bot]"
+          git config user.email "gremlyn-bot@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -A
+          git commit -m "fix(agent): resilience fixes from /gremlyn:chaos-test"
+          git push --force-with-lease origin "$branch"
+
+          { printf '%s' "$warn"; cat "$RUNNER_TEMP/fix.md"; } > "$RUNNER_TEMP/body.md"
+          gh pr create --base "$BASE" --head "$branch" \
+            --title "Gremlyn: resilience fixes for #$PR" --body-file "$RUNNER_TEMP/body.md"

@@ -1,0 +1,18 @@
+*                                   @grotadmorv
+
+/pkg/proxy/                         @grotadmorv
+/pkg/protocol/                      @grotadmorv
+
+/internal/arena/chaos/              @grotadmorv
+/internal/arena/scoring/            @grotadmorv
+/internal/arena/gremlins/           @grotadmorv
+
+/.github/workflows/                 @grotadmorv
+/.github/dependabot.yml             @grotadmorv
+/.goreleaser.yaml                   @grotadmorv
+/install.sh                         @grotadmorv
+/action/                            @grotadmorv
+/skills/                            @grotadmorv
+/commands/                          @grotadmorv
+/scripts/                           @grotadmorv
+/.claude-plugin/                    @grotadmorv
