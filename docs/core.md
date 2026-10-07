@@ -1,68 +1,86 @@
-# Gremlyn Core — Shared proxy engine & CLI
- 
-## Project overview
-Gremlyn Core is the shared Go library that provides the MCP (Model Context Protocol) proxy engine used by both Gremlyn Shield (firewall) and Gremlyn Arena (chaos testing). It also contains the main `gremlyn` CLI binary.
- 
-This is a **library first** — Shield and Arena import `pkg/` packages. The CLI in `cmd/gremlyn/` orchestrates both services.
- 
-## Tech stack
-- Go 1.22+
-- JSON-RPC 2.0 over stdio and HTTP/SSE
-- No web framework needed for the proxy (net/http + goroutines)
-- cobra for CLI
-- zerolog for structured logging
-- YAML parsing: gopkg.in/yaml.v3
- 
-## Architecture
-- `pkg/` contains all public packages (importable by shield/arena repos)
-- `internal/` contains CLI-specific code only
-- `cmd/gremlyn/` is the CLI entry point
- 
-## Code style — IMPORTANT
-- All types MUST be strongly typed with Go structs. Never use map[string]interface{} for known data structures.
-- Every exported function MUST have a godoc comment.
-- Every struct field MUST have a json tag and a yaml tag where applicable.
-- Error handling: always wrap errors with fmt.Errorf("context: %w", err). Never discard errors silently.
-- Use custom error types for domain errors (e.g., ErrPolicyViolation, ErrProxyTimeout).
-- Prefer interfaces for testability. Define interfaces in the consumer package, not the provider.
-- No global state. Pass dependencies via constructor injection.
-- Context: every function that does I/O MUST accept context.Context as first parameter.
-- Naming: use Go conventions — camelCase for private, PascalCase for public, short receiver names (p for Proxy, c for Config).
- 
-## Project structure
+# Core: proxy, protocol, CLI
+
+Gremlyn ships as one binary, `gremlyn`. Everything goes through one proxy: `wrap`, which
+launches a stdio MCP server as a child process and sits on its stdin and stdout. The chaos
+engine plugs into that proxy as two pipeline stages.
+
+## Layout
+
 ```
-cmd/gremlyn/main.go          → CLI entry (cobra root command)
-pkg/proxy/proxy.go            → Core proxy interface + factory
-pkg/proxy/wrap.go             → Stdio wrap mode (local MCP servers)
-pkg/proxy/httpproxy.go        → HTTP/SSE reverse proxy mode
-pkg/proxy/jsonrpc.go          → JSON-RPC 2.0 message parser
-pkg/proxy/pipeline.go         → Analysis pipeline (hook system for shield/arena)
-pkg/config/config.go          → gremlyn.yaml parser
-pkg/config/mcpconfig.go       → MCP client config detection + rewrite
-pkg/protocol/messages.go      → MCP message types (ToolCall, ToolResult, etc.)
-pkg/protocol/transport.go     → Transport abstraction (stdio vs HTTP)
-pkg/models/models.go          → Shared domain models
-internal/cli/                 → CLI commands (init, status, doctor, version)
+cmd/gremlyn/                 cobra root command
+pkg/protocol/                MCP / JSON-RPC message types, newline-delimited framing
+pkg/proxy/                   the stdio wrap proxy and the pipeline
+pkg/models/                  shared domain models: sessions, events, outcomes
+pkg/datadir/                 ~/.gremlyn resolution, GREMLYN_DATA_DIR overrides it
+internal/cli/                the commands
+internal/arena/chaos/        gremlin handler, observer, rubric, event files
+internal/arena/gremlins/     the eight failure injectors
+internal/arena/scoring/      events to resilience report, pure
+internal/arena/storage/      run history as plain files
+action/                      the GitHub Action
+.claude-plugin/ skills/ commands/ scripts/   the Claude Code plugin
 ```
- 
-## Commands
+
+`pkg/` never imports `internal/`.
+
+## The proxy
+
+`proxy.NewWrapProxy` starts the child, then runs two pumps: client to server and server to
+client. Every message goes through `Pipeline.Process` before it is forwarded.
+
+- **Framing is one JSON object per line**, which is what MCP's stdio transport specifies. A
+  peer that speaks `Content-Length` framing gets an explicit diagnostic.
+- **A single message is capped in size** in both directions. Both peers are untrusted, and
+  an uncapped read is memory exhaustion inline with the agent.
+- **Shutdown drains in-flight responses** before the child is stopped, so the agent never
+  loses an answer to a request it already sent.
+- **A client that ends the session with SIGTERM ended it normally.** MCP's stdio transport
+  allows it, and Claude Code does it.
+
+HTTP and SSE MCP servers are not proxied.
+
+## The pipeline
+
+The pipeline is the only extension point: adding a gremlin never requires a change in
+`pkg/proxy`.
+
+A stage implements `proxy.Handler`: a name, a priority, a direction, and `HandleMessage`,
+which returns a decision: pass, modify, redact or block. Stages run in priority order:
+
+| Priority | Stage | Role |
+|---|---|---|
+| 50 | Arena observer | records what the agent did after an injection |
+| 100 | Arena gremlins | mutate at most one tool exchange |
+
+The order is a contract. The observer runs first so it sees what the agent sent, not what a
+gremlin rewrote; reordering changes what a score means.
+
+A stage that panics is contained: `Pipeline.callHandler` recovers, treats it as an error,
+skips that stage and runs the rest. A `block` is answered to the agent as a JSON-RPC error,
+never as a silent drop, which the agent would experience as a hang.
+
+## The CLI
+
+| Command | What it does |
+|---|---|
+| `gremlyn arena ci` | run the scenarios in `.gremlyn/arena.yaml` against an agent and score them |
+| `gremlyn arena report <report.json> [--baseline base.json]` | render a report as the Markdown a pull request shows |
+| `gremlyn arena replay <summary.json>` | rebuild the exact `wrap` command of a past run |
+| `gremlyn arena sessions` | list recorded runs |
+| `gremlyn arena list-gremlins` | describe the gremlins |
+| `gremlyn wrap [flags] -- <server command>` | run an MCP server behind the proxy; `--chaos-*` flags enable gremlins |
+| `gremlyn version` | print the version |
+
+There is no service and no database. Run history is plain files under
+`~/.gremlyn/arena/sessions/`.
+
+## Building
+
 ```bash
-go build -o gremlyn ./cmd/gremlyn      # Build CLI binary
-go test ./...                           # Run all tests
-go test ./pkg/proxy/ -v                 # Run proxy tests
-go vet ./...                            # Static analysis
-golangci-lint run                       # Linting
+make build
+make check
+make plugin-check
 ```
- 
-## Testing rules
-- Every package MUST have a _test.go file.
-- Use table-driven tests for all functions with multiple input scenarios.
-- Use testify/assert for assertions, testify/require for fatal checks.
-- Mock external dependencies with interfaces, not concrete types.
-- Test file naming: foo_test.go next to foo.go.
-- Integration tests in a separate _integration_test.go with build tag //go:build integration.
- 
-## Git workflow
-- Branch naming: feat/xxx, fix/xxx, refactor/xxx
-- Commit messages: conventional commits (feat:, fix:, refactor:, test:, docs:)
-- Always run `go vet ./... && go test ./...` before committing.
+
+`make check` is the gate: vet, lint, the race-enabled test suite and govulncheck.
+`make plugin-check` validates the plugin manifests and the shell scripts.
