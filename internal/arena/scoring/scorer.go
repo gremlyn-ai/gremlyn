@@ -2,11 +2,11 @@ package scoring
 
 import (
 	"math"
+	"sort"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/models"
 )
 
-// DimensionScore holds the score and statistics for a single dimension.
 type DimensionScore struct {
 	Score    int     `json:"score"`
 	Total    int     `json:"total"`
@@ -17,32 +17,44 @@ type DimensionScore struct {
 	Grade    Grade   `json:"grade"`
 }
 
-// ResilienceReport is the complete scoring output for a chaos session.
 type ResilienceReport struct {
-	Overall    int                          `json:"overall"`
-	Grade      Grade                        `json:"grade"`
-	Dimensions map[Dimension]DimensionScore `json:"dimensions"`
+	Overall          int                          `json:"overall"`
+	Grade            Grade                        `json:"grade"`
+	Dimensions       map[Dimension]DimensionScore `json:"dimensions"`
+	Measured         bool                         `json:"measured"`
+	UnmappedGremlins []string                     `json:"unmapped_gremlins,omitempty"`
 }
 
-// Score calculates a ResilienceReport from arena events.
-// This is a pure function with no side effects.
 func Score(events []models.ArenaEvent, weights map[Dimension]float64) ResilienceReport {
 	if weights == nil {
 		weights = DefaultWeights
 	}
 
-	// Group events by dimension.
 	grouped := make(map[Dimension][]models.ArenaEvent)
+	unmappedSet := make(map[string]struct{})
 	for _, e := range events {
+		if e.Outcome == models.OutcomeUnmeasured {
+			continue
+		}
+
 		dim, ok := GremlinToDimension[e.GremlinType]
 		if !ok {
+			unmappedSet[e.GremlinType] = struct{}{}
 			continue
 		}
 		grouped[dim] = append(grouped[dim], e)
 	}
 
+	unmapped := make([]string, 0, len(unmappedSet))
+	for name := range unmappedSet {
+		unmapped = append(unmapped, name)
+	}
+
+	sort.Strings(unmapped)
+
 	report := ResilienceReport{
-		Dimensions: make(map[Dimension]DimensionScore),
+		Dimensions:       make(map[Dimension]DimensionScore),
+		UnmappedGremlins: unmapped,
 	}
 
 	var weightedSum float64
@@ -60,9 +72,13 @@ func Score(events []models.ArenaEvent, weights map[Dimension]float64) Resilience
 		}
 	}
 
-	if totalWeight > 0 {
-		report.Overall = int(math.Round(weightedSum / totalWeight))
+	report.Measured = totalWeight > 0
+	if !report.Measured {
+		report.Grade = GradeNoData
+		return report
 	}
+
+	report.Overall = int(math.Round(weightedSum / totalWeight))
 	report.Grade = GradeFromScore(report.Overall)
 
 	return report
@@ -70,7 +86,6 @@ func Score(events []models.ArenaEvent, weights map[Dimension]float64) Resilience
 
 func scoreDimension(events []models.ArenaEvent, weight float64) DimensionScore {
 	ds := DimensionScore{Weight: weight}
-
 	if len(events) == 0 {
 		return ds
 	}
@@ -86,6 +101,7 @@ func scoreDimension(events []models.ArenaEvent, weight float64) DimensionScore {
 			ds.Degraded++
 		case models.OutcomeCrashed:
 			ds.Crashed++
+		case models.OutcomeUnmeasured:
 		}
 		scoreSum += e.Score
 	}

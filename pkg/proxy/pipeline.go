@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -12,23 +13,16 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// DecisionAction represents what the pipeline decided to do with a message.
 type DecisionAction string
 
 const (
-	// DecisionAllow lets the message through unchanged.
-	DecisionAllow DecisionAction = "allow"
-	// DecisionBlock rejects the message.
-	DecisionBlock DecisionAction = "block"
-	// DecisionRedact sanitizes the message before forwarding.
+	DecisionAllow  DecisionAction = "allow"
+	DecisionBlock  DecisionAction = "block"
 	DecisionRedact DecisionAction = "redact"
-	// DecisionModify alters the message before forwarding.
 	DecisionModify DecisionAction = "modify"
-	// DecisionSkip means the handler has no opinion on this message.
-	DecisionSkip DecisionAction = "skip"
+	DecisionSkip   DecisionAction = "skip"
 )
 
-// Decision represents the result of a handler processing a message.
 type Decision struct {
 	Action          DecisionAction    `json:"action"`
 	ModifiedMessage *protocol.Message `json:"modified_message,omitempty"`
@@ -37,7 +31,6 @@ type Decision struct {
 	Metadata        map[string]string `json:"metadata,omitempty"`
 }
 
-// MessageContext provides context about a message being processed by the pipeline.
 type MessageContext struct {
 	ServerName        string              `json:"server_name"`
 	Direction         models.Direction    `json:"direction"`
@@ -46,40 +39,20 @@ type MessageContext struct {
 	CorrelatedRequest *protocol.Message   `json:"correlated_request,omitempty"`
 }
 
-// Handler is the interface for synchronous pipeline handlers.
-// Shield registers policy handlers, detection handlers, etc.
-// Arena registers gremlin injection handlers.
 type Handler interface {
-	// Name returns a unique identifier for this handler.
 	Name() string
-	// Priority returns the execution order (lower number = runs first).
 	Priority() int
-	// Direction returns which direction(s) this handler processes.
 	Direction() models.Direction
-	// HandleMessage processes a message and returns a decision.
 	HandleMessage(ctx context.Context, msg *protocol.Message, mctx *MessageContext) (*Decision, error)
 }
 
-// AsyncHandler extends Handler with post-forwarding async processing.
-// Used for logging, alerting, ML analysis, and other non-blocking work.
-type AsyncHandler interface {
-	Handler
-	// HandleAsync is called after the message has been forwarded or blocked.
-	// Runs in a separate goroutine. Receives the final decision.
-	HandleAsync(ctx context.Context, msg *protocol.Message, mctx *MessageContext, decision *Decision)
-}
-
-// Pipeline processes intercepted MCP messages through registered handlers.
-// It is the hook system that enables Shield and Arena to plug into the proxy.
 type Pipeline struct {
-	handlers      []Handler
-	asyncHandlers []AsyncHandler
-	mu            sync.RWMutex
-	correlator    *RequestCorrelator
-	logger        zerolog.Logger
+	handlers   []Handler
+	mu         sync.RWMutex
+	correlator *RequestCorrelator
+	logger     zerolog.Logger
 }
 
-// NewPipeline creates a new Pipeline with the given logger.
 func NewPipeline(logger zerolog.Logger) *Pipeline {
 	return &Pipeline{
 		correlator: NewRequestCorrelator(5 * time.Minute),
@@ -87,7 +60,33 @@ func NewPipeline(logger zerolog.Logger) *Pipeline {
 	}
 }
 
-// RegisterHandler adds a synchronous handler to the pipeline, sorted by priority.
+func (p *Pipeline) callHandler(
+	ctx context.Context,
+	h Handler,
+	msg *protocol.Message,
+	mctx *MessageContext,
+) (decision *Decision, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			p.logger.Error().
+				Str("handler", h.Name()).
+				Interface("panic", r).
+				Bytes("stack", debug.Stack()).
+				Msg("handler panicked, containing it")
+			decision = nil
+			err = fmt.Errorf("handler %q panicked: %v", h.Name(), r)
+		}
+	}()
+
+	return h.HandleMessage(ctx, msg, mctx)
+}
+
+func (p *Pipeline) Close() {
+	if p.correlator != nil {
+		p.correlator.Close()
+	}
+}
+
 func (p *Pipeline) RegisterHandler(h Handler) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -100,56 +99,11 @@ func (p *Pipeline) RegisterHandler(h Handler) {
 	p.logger.Info().Str("handler", h.Name()).Int("priority", h.Priority()).Msg("handler registered")
 }
 
-// RegisterAsyncHandler adds an async handler to the pipeline.
-func (p *Pipeline) RegisterAsyncHandler(h AsyncHandler) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Also add to sync handlers for the HandleMessage phase.
-	p.handlers = append(p.handlers, h)
-	sort.Slice(p.handlers, func(i, j int) bool {
-		return p.handlers[i].Priority() < p.handlers[j].Priority()
-	})
-
-	p.asyncHandlers = append(p.asyncHandlers, h)
-	p.logger.Info().Str("handler", h.Name()).Msg("async handler registered")
-}
-
-// UnregisterHandler removes a handler by name.
-func (p *Pipeline) UnregisterHandler(name string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Remove from sync handlers.
-	filtered := make([]Handler, 0, len(p.handlers))
-	for _, h := range p.handlers {
-		if h.Name() != name {
-			filtered = append(filtered, h)
-		}
-	}
-	p.handlers = filtered
-
-	// Remove from async handlers.
-	asyncFiltered := make([]AsyncHandler, 0, len(p.asyncHandlers))
-	for _, h := range p.asyncHandlers {
-		if h.Name() != name {
-			asyncFiltered = append(asyncFiltered, h)
-		}
-	}
-	p.asyncHandlers = asyncFiltered
-
-	p.logger.Info().Str("handler", name).Msg("handler unregistered")
-}
-
-// Process runs a message through all registered handlers and returns the final decision
-// and the (possibly modified) message.
 func (p *Pipeline) Process(ctx context.Context, msg *protocol.Message, mctx *MessageContext) (*Decision, *protocol.Message, error) {
-	// Step 1: Track outgoing requests for correlation.
 	if mctx.Direction == models.DirectionOutgoing && msg.Type == protocol.MessageTypeRequest {
 		p.correlator.TrackRequest(msg)
 	}
 
-	// Step 2: Correlate incoming responses with their original requests.
 	if mctx.Direction == models.DirectionIncoming && msg.Type == protocol.MessageTypeResponse {
 		correlated := p.correlator.CorrelateResponse(msg)
 		if correlated != nil {
@@ -160,21 +114,17 @@ func (p *Pipeline) Process(ctx context.Context, msg *protocol.Message, mctx *Mes
 	p.mu.RLock()
 	handlers := make([]Handler, len(p.handlers))
 	copy(handlers, p.handlers)
-	asyncHandlers := make([]AsyncHandler, len(p.asyncHandlers))
-	copy(asyncHandlers, p.asyncHandlers)
 	p.mu.RUnlock()
 
-	// Step 3: Run sync handlers in priority order.
 	currentMsg := msg
 	var finalDecision *Decision
 
 	for _, h := range handlers {
-		// Direction filtering.
 		if !h.Direction().Matches(mctx.Direction) {
 			continue
 		}
 
-		decision, err := h.HandleMessage(ctx, currentMsg, mctx)
+		decision, err := p.callHandler(ctx, h, currentMsg, mctx)
 		if err != nil {
 			p.logger.Warn().Err(err).Str("handler", h.Name()).Msg("handler error, continuing")
 			continue
@@ -185,16 +135,11 @@ func (p *Pipeline) Process(ctx context.Context, msg *protocol.Message, mctx *Mes
 
 		switch decision.Action {
 		case DecisionBlock:
-			// Block immediately — short circuit.
 			p.logger.Info().
 				Str("handler", h.Name()).
 				Str("reason", decision.Reason).
 				Msg("message blocked")
 
-			// Fan out to async handlers with the block decision.
-			for _, ah := range asyncHandlers {
-				go ah.HandleAsync(ctx, currentMsg, mctx, decision)
-			}
 			return decision, nil, nil
 
 		case DecisionRedact, DecisionModify:
@@ -209,7 +154,6 @@ func (p *Pipeline) Process(ctx context.Context, msg *protocol.Message, mctx *Mes
 			}
 
 		case DecisionSkip:
-			// No opinion, continue.
 		}
 	}
 
@@ -217,27 +161,14 @@ func (p *Pipeline) Process(ctx context.Context, msg *protocol.Message, mctx *Mes
 		finalDecision = &Decision{Action: DecisionAllow}
 	}
 
-	// Step 4: Fan out to async handlers.
-	for _, ah := range asyncHandlers {
-		go ah.HandleAsync(ctx, currentMsg, mctx, finalDecision)
-	}
-
 	return finalDecision, currentMsg, nil
 }
 
-// HandlerCount returns the number of registered handlers (for testing/status).
-func (p *Pipeline) HandlerCount() int {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return len(p.handlers)
-}
-
-// --- Request Correlator ---
-
-// RequestCorrelator tracks in-flight JSON-RPC requests to correlate them with responses.
 type RequestCorrelator struct {
-	pending sync.Map
-	ttl     time.Duration
+	pending  sync.Map
+	ttl      time.Duration
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 type correlatedEntry struct {
@@ -245,14 +176,16 @@ type correlatedEntry struct {
 	timestamp time.Time
 }
 
-// NewRequestCorrelator creates a correlator with the given TTL for pending requests.
 func NewRequestCorrelator(ttl time.Duration) *RequestCorrelator {
-	rc := &RequestCorrelator{ttl: ttl}
+	rc := &RequestCorrelator{ttl: ttl, stop: make(chan struct{})}
 	go rc.cleanupLoop()
 	return rc
 }
 
-// TrackRequest records an outgoing request for later correlation.
+func (rc *RequestCorrelator) Close() {
+	rc.stopOnce.Do(func() { close(rc.stop) })
+}
+
 func (rc *RequestCorrelator) TrackRequest(msg *protocol.Message) {
 	if msg.Type != protocol.MessageTypeRequest || msg.Request == nil {
 		return
@@ -264,7 +197,6 @@ func (rc *RequestCorrelator) TrackRequest(msg *protocol.Message) {
 	})
 }
 
-// CorrelateResponse finds and removes the original request for a response.
 func (rc *RequestCorrelator) CorrelateResponse(msg *protocol.Message) *protocol.Message {
 	if msg.Type != protocol.MessageTypeResponse || msg.Response == nil {
 		return nil
@@ -281,21 +213,23 @@ func (rc *RequestCorrelator) CorrelateResponse(msg *protocol.Message) *protocol.
 func (rc *RequestCorrelator) cleanupLoop() {
 	ticker := time.NewTicker(rc.ttl)
 	defer ticker.Stop()
-	for range ticker.C {
-		now := time.Now()
-		rc.pending.Range(func(key, value any) bool {
-			entry := value.(*correlatedEntry)
-			if now.Sub(entry.timestamp) > rc.ttl {
-				rc.pending.Delete(key)
-			}
-			return true
-		})
+	for {
+		select {
+		case <-rc.stop:
+			return
+		case <-ticker.C:
+			now := time.Now()
+			rc.pending.Range(func(key, value any) bool {
+				entry := value.(*correlatedEntry)
+				if now.Sub(entry.timestamp) > rc.ttl {
+					rc.pending.Delete(key)
+				}
+				return true
+			})
+		}
 	}
 }
 
-// --- Helper for creating error responses ---
-
-// NewBlockErrorResponse creates a JSON-RPC error response for a blocked request.
 func NewBlockErrorResponse(requestID protocol.JSONRPCID, reason string) *protocol.Message {
 	return &protocol.Message{
 		Type: protocol.MessageTypeResponse,

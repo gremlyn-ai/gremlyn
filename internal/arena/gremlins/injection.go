@@ -7,18 +7,12 @@ import (
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
 )
 
-// InjectionGremlin injects a prompt injection payload into MCP server responses,
-// testing how the agent handles adversarial content embedded in tool results.
 type InjectionGremlin struct {
-	// Payload is the injection string to embed in the response.
-	Payload string `json:"payload"`
-	// Probability of injection (0.0–1.0).
+	Payload     string  `json:"payload"`
 	Probability float64 `json:"probability"`
-	// rng is this gremlin's own seeded random source.
-	rng *rng
+	rng         *rng
 }
 
-// NewInjectionGremlin creates an InjectionGremlin with the given config.
 func NewInjectionGremlin(payload string, probability float64, opts ...Option) *InjectionGremlin {
 	o := applyOptions(opts)
 	return &InjectionGremlin{
@@ -27,17 +21,16 @@ func NewInjectionGremlin(payload string, probability float64, opts ...Option) *I
 		rng:         newRNG(o.seed, "injection"),
 	}
 }
-
-// Name implements Gremlin.
 func (g *InjectionGremlin) Name() string { return "injection" }
-
-// Description implements Gremlin.
 func (g *InjectionGremlin) Description() string {
 	return "Injects prompt injection payloads into MCP server responses"
 }
 
-// Inject adds a prompt injection payload to the response result as a hidden field.
 func (g *InjectionGremlin) Inject(_ context.Context, msg *protocol.Message) (*protocol.Message, bool, error) {
+	if msg == nil {
+		return nil, false, nil
+	}
+
 	if msg.Response == nil || msg.Response.Result == nil {
 		return msg, false, nil
 	}
@@ -48,7 +41,6 @@ func (g *InjectionGremlin) Inject(_ context.Context, msg *protocol.Message) (*pr
 
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(msg.Response.Result, &obj); err != nil {
-		// If not an object, wrap in one.
 		obj = map[string]json.RawMessage{
 			"data": msg.Response.Result,
 		}

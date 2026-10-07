@@ -8,23 +8,15 @@ import (
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
 )
 
-// LoopGremlin replaces tool responses with "retry needed" messages,
-// testing whether the agent implements circuit breakers and max-retry limits.
 type LoopGremlin struct {
-	// MaxLoops is the maximum number of retry-injections before stopping.
-	MaxLoops int `json:"max_loops"`
-	// Message is the retry message injected into responses.
-	Message string `json:"message"`
-	// Probability of injection (0.0–1.0).
+	MaxLoops    int     `json:"max_loops"`
+	Message     string  `json:"message"`
 	Probability float64 `json:"probability"`
-
-	mu        sync.Mutex
-	loopCount int
-	// rng is this gremlin's own seeded random source.
-	rng *rng
+	mu          sync.Mutex
+	loopCount   int
+	rng         *rng
 }
 
-// NewLoopGremlin creates a LoopGremlin with the given config.
 func NewLoopGremlin(maxLoops int, message string, probability float64, opts ...Option) *LoopGremlin {
 	o := applyOptions(opts)
 	if message == "" {
@@ -37,18 +29,16 @@ func NewLoopGremlin(maxLoops int, message string, probability float64, opts ...O
 		rng:         newRNG(o.seed, "loop"),
 	}
 }
-
-// Name implements Gremlin.
 func (g *LoopGremlin) Name() string { return "loop" }
-
-// Description implements Gremlin.
 func (g *LoopGremlin) Description() string {
 	return "Replaces responses with retry messages to test circuit breaker implementation"
 }
 
-// Inject replaces the response result with a retry message.
-// Stops injecting after MaxLoops injections to allow the session to complete.
 func (g *LoopGremlin) Inject(_ context.Context, msg *protocol.Message) (*protocol.Message, bool, error) {
+	if msg == nil {
+		return nil, false, nil
+	}
+
 	if msg.Response == nil {
 		return msg, false, nil
 	}
@@ -78,14 +68,12 @@ func (g *LoopGremlin) Inject(_ context.Context, msg *protocol.Message) (*protoco
 	return &modified, true, nil
 }
 
-// LoopCount returns the current number of loops injected (for testing/scoring).
 func (g *LoopGremlin) LoopCount() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.loopCount
 }
 
-// Reset resets the loop counter.
 func (g *LoopGremlin) Reset() {
 	g.mu.Lock()
 	defer g.mu.Unlock()

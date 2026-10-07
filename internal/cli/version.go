@@ -1,4 +1,3 @@
-// Package cli implements the gremlyn CLI commands using cobra.
 package cli
 
 import (
@@ -7,14 +6,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Build-time variables injected via ldflags.
 var (
 	Version   = "dev"
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
 
-// NewVersionCmd creates the "version" subcommand.
 func NewVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",

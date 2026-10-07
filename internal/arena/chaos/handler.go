@@ -13,75 +13,26 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// GremlinHandler adapts Arena's gremlins to proxy.Handler, so chaos is injected
-// into real MCP traffic flowing through the shared proxy pipeline.
-//
-// It runs late (see Priority) so that Shield, if also registered, has already
-// decided on the message: a gremlin must not be able to smuggle a payload past a
-// policy that would have blocked it.
 type GremlinHandler struct {
-	// gremlins is an ORDERED slice, never a map or Registry.List(): map
-	// iteration order is random, and a session whose injection order varies
-	// between runs cannot be replayed, which makes its score meaningless.
-	gremlins        []gremlins.Gremlin
-	sink            InjectionSink
-	logger          zerolog.Logger
-	now             func() time.Time
-	newID           func() string
-	injectHandshake bool
+	gremlins []gremlins.Gremlin
+	sink     InjectionSink
+	logger   zerolog.Logger
+	now      func() time.Time
+	newID    func() string
 }
 
-// handshakeMethods are the protocol methods a chaos session leaves alone.
-//
-// Corrupting the handshake tests the agent's MCP *client library*, not the
-// agent's judgement, and it can stop the session from starting at all. Worse for
-// the measurement: the agent's normal next step after the handshake looks like a
-// reaction, which inflates the score and makes a robust and a fragile agent score
-// identically. The discriminance gate caught exactly that.
-//
-// Agent judgement lives in what it does with a tool result, so that is what a
-// session injects into.
-var handshakeMethods = map[string]bool{
-	"initialize":                true,
-	"notifications/initialized": true,
-	"tools/list":                true,
-	"resources/list":            true,
-	"prompts/list":              true,
-	"notifications/cancelled":   true,
-	"ping":                      true,
-}
+const toolCallMethod = "tools/call"
 
-// HandlerOption configures a GremlinHandler.
 type HandlerOption func(*GremlinHandler)
 
-// WithHandshakeInjection allows gremlins to act on handshake traffic.
-//
-// Off by default. Turn it on only to test an MCP client's own robustness, and
-// know that the resulting resilience score says little about the agent.
-func WithHandshakeInjection(enabled bool) HandlerOption {
-	return func(h *GremlinHandler) { h.injectHandshake = enabled }
-}
-
-// WithClock overrides the time source. Tests use this to keep injection records
-// deterministic.
 func WithClock(now func() time.Time) HandlerOption {
 	return func(h *GremlinHandler) { h.now = now }
 }
 
-// WithIDGenerator overrides injection ID generation. Tests use this to keep
-// injection records deterministic.
 func WithIDGenerator(newID func() string) HandlerOption {
 	return func(h *GremlinHandler) { h.newID = newID }
 }
 
-// NewGremlinHandler builds a handler for an ordered set of gremlins.
-//
-// The order is part of the session's identity: given the same seed and the same
-// message sequence, the same gremlin must fire on the same message. Callers must
-// pass gremlins in a stable order (the order the session config lists them),
-// not whatever Registry.List returns.
-//
-// sink may be nil, in which case injections are logged and discarded.
 func NewGremlinHandler(ordered []gremlins.Gremlin, sink InjectionSink, logger zerolog.Logger, opts ...HandlerOption) *GremlinHandler {
 	h := &GremlinHandler{
 		gremlins: ordered,
@@ -95,40 +46,21 @@ func NewGremlinHandler(ordered []gremlins.Gremlin, sink InjectionSink, logger ze
 	}
 	return h
 }
-
-// Name returns the handler's pipeline identifier.
-func (h *GremlinHandler) Name() string { return "arena-gremlins" }
-
-// Priority returns 100 — chaos runs after Shield's policy (priority 10), so a
-// gremlin can never bypass a decision that would have blocked the message.
-func (h *GremlinHandler) Priority() int { return 100 }
-
-// Direction returns both: some gremlins alter outgoing tool calls, others alter
-// incoming results. Each gremlin decides for itself whether a given message is
-// one it acts on.
+func (h *GremlinHandler) Name() string                { return "arena-gremlins" }
+func (h *GremlinHandler) Priority() int               { return 100 }
 func (h *GremlinHandler) Direction() models.Direction { return models.DirectionBoth }
-
-// HandleMessage offers the message to each gremlin in order and returns the first
-// mutation produced.
-//
-// At most one gremlin injects per message. Letting several compose would make the
-// agent's reaction impossible to attribute to a cause, and attribution is the
-// whole point of the resilience score.
 func (h *GremlinHandler) HandleMessage(ctx context.Context, msg *protocol.Message, mctx *proxy.MessageContext) (*proxy.Decision, error) {
 	if err := ctx.Err(); err != nil {
 		return &proxy.Decision{Action: proxy.DecisionSkip}, nil
 	}
 
-	if !h.injectHandshake && isHandshake(msg, mctx) {
+	if !isToolCall(msg, mctx) {
 		return &proxy.Decision{Action: proxy.DecisionSkip}, nil
 	}
 
 	for _, g := range h.gremlins {
 		modified, injected, err := g.Inject(ctx, msg)
 		if err != nil {
-			// A gremlin's own failure must never break the user's traffic. Arena
-			// is a testing tool; if it breaks the agent by accident, every result
-			// it produces afterwards is noise. Log and move on.
 			h.logger.Warn().Err(err).
 				Str("gremlin", g.Name()).
 				Msg("gremlin injection failed, passing message through untouched")
@@ -138,9 +70,6 @@ func (h *GremlinHandler) HandleMessage(ctx context.Context, msg *protocol.Messag
 			continue
 		}
 		if modified == nil {
-			// Contract violation: a gremlin claiming an injection must return the
-			// altered message. Forwarding nil here would drop the message and
-			// hang the agent.
 			h.logger.Error().
 				Str("gremlin", g.Name()).
 				Msg("gremlin reported an injection but returned no message, ignoring")
@@ -156,11 +85,9 @@ func (h *GremlinHandler) HandleMessage(ctx context.Context, msg *protocol.Messag
 			Metadata:        map[string]string{"gremlin": g.Name()},
 		}, nil
 	}
-
 	return &proxy.Decision{Action: proxy.DecisionSkip}, nil
 }
 
-// record hands the injection to the sink.
 func (h *GremlinHandler) record(name string, original, modified *protocol.Message, mctx *proxy.MessageContext) {
 	if h.sink == nil {
 		return
@@ -172,6 +99,7 @@ func (h *GremlinHandler) record(name string, original, modified *protocol.Messag
 		Direction:   mctx.Direction,
 		RequestID:   messageID(original),
 		Method:      correlatedMethod(original, mctx),
+		Tool:        correlatedTool(original, mctx),
 		InjectedAt:  h.now(),
 		Original:    original,
 		Modified:    modified,
@@ -179,21 +107,14 @@ func (h *GremlinHandler) record(name string, original, modified *protocol.Messag
 	h.sink.RecordInjection(inj)
 }
 
-// isHandshake reports whether a message belongs to protocol setup rather than to
-// the agent's actual work. A response is judged by the request it answers.
-func isHandshake(msg *protocol.Message, mctx *proxy.MessageContext) bool {
-	if msg != nil && handshakeMethods[msg.GetMethod()] {
+func isToolCall(msg *protocol.Message, mctx *proxy.MessageContext) bool {
+	if msg != nil && msg.GetMethod() == toolCallMethod {
 		return true
 	}
-	if mctx != nil && mctx.CorrelatedRequest != nil {
-		return handshakeMethods[mctx.CorrelatedRequest.GetMethod()]
-	}
-	// A response the correlator could not match: without knowing what it answers
-	// we cannot call it handshake, so let the gremlins see it.
-	return false
+	return mctx != nil && mctx.CorrelatedRequest != nil &&
+		mctx.CorrelatedRequest.GetMethod() == toolCallMethod
 }
 
-// messageID returns the JSON-RPC id as a string, or "" for a notification.
 func messageID(msg *protocol.Message) string {
 	if msg == nil {
 		return ""
@@ -205,11 +126,16 @@ func messageID(msg *protocol.Message) string {
 	return id.String()
 }
 
-// correlatedMethod resolves the method a message belongs to.
-//
-// A response carries no method of its own, so it is taken from the request the
-// pipeline's correlator matched it to — without that, an injection on a tool
-// result could not be attributed to the tool that was called.
+func correlatedTool(msg *protocol.Message, mctx *proxy.MessageContext) string {
+	if t := toolName(msg); t != "" {
+		return t
+	}
+	if mctx != nil && mctx.CorrelatedRequest != nil {
+		return toolName(mctx.CorrelatedRequest)
+	}
+	return ""
+}
+
 func correlatedMethod(msg *protocol.Message, mctx *proxy.MessageContext) string {
 	if msg != nil {
 		if m := msg.GetMethod(); m != "" {

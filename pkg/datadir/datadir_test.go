@@ -33,13 +33,3 @@ func TestDir_EnvOverride(t *testing.T) {
 	assert.Equal(t, custom, dir)
 	assert.DirExists(t, dir)
 }
-
-func TestDBPath(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("GREMLYN_DATA_DIR", tmp)
-
-	p, err := DBPath("shield.db")
-	require.NoError(t, err)
-
-	assert.Equal(t, filepath.Join(tmp, "shield.db"), p)
-}

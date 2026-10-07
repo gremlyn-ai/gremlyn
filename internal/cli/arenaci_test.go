@@ -18,8 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ── Config validation ──
-
 func TestValidateCIConfig(t *testing.T) {
 	valid := func() CIConfig {
 		return CIConfig{
@@ -37,8 +35,6 @@ func TestValidateCIConfig(t *testing.T) {
 		{"valid", func(*CIConfig) {}, ""},
 		{"no agent command", func(c *CIConfig) { c.Agent.Command = nil }, "agent.command is required"},
 		{
-			// Without the placeholder the agent talks to its own MCP servers, never
-			// crosses the proxy, and the run measures nothing while looking fine.
 			"agent command without the mcp_config placeholder",
 			func(c *CIConfig) { c.Agent.Command = []string{"agent", "-p", "hi"} },
 			"must contain {{mcp_config}}",
@@ -70,8 +66,6 @@ func TestValidateCIConfig(t *testing.T) {
 	}
 }
 
-// ── Threshold logic ──
-
 func TestCheckThresholds(t *testing.T) {
 	full := func(overall int) ScenarioResult {
 		return ScenarioResult{
@@ -90,8 +84,6 @@ func TestCheckThresholds(t *testing.T) {
 		assert.Contains(t, f[0], "below the minimum")
 	})
 
-	// The trap found while validating the headless contract: an agent can exit 0
-	// having never called a tool. Nothing was tested, so this must not pass.
 	t.Run("no gremlin crossed is a failure, not a pass", func(t *testing.T) {
 		res := ScenarioResult{
 			Report:   scoring.ResilienceReport{Overall: 100},
@@ -112,7 +104,6 @@ func TestCheckThresholds(t *testing.T) {
 		assert.Contains(t, f[0], "coverage incomplete")
 	})
 
-	// A threshold on a dimension that never ran would otherwise pass silently.
 	t.Run("threshold on an unexercised dimension fails", func(t *testing.T) {
 		res := full(90)
 		f := checkThresholds(ThresholdConfig{
@@ -123,17 +114,13 @@ func TestCheckThresholds(t *testing.T) {
 	})
 }
 
-// ── MCP config generation ──
-
-// The generated config must point the agent at this binary in chaos mode, or the
-// gremlins are not in the traffic path at all.
 func TestWriteMCPConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
 
 	err := writeMCPConfig(path, "/usr/bin/gremlyn",
 		MCPServerConfig{Name: "memory", Command: []string{"npx", "-y", "server-memory"}},
-		ScenarioConfig{Gremlins: []string{"corruption", "latency"}, Intensity: "high"},
+		ScenarioConfig{Gremlins: []string{"corruption", "latency"}, Intensity: "high", Window: 45 * time.Second},
 		42, "/tmp/e.jsonl", "/tmp/s.json")
 	require.NoError(t, err)
 
@@ -158,8 +145,8 @@ func TestWriteMCPConfig(t *testing.T) {
 	assert.Contains(t, joined, "--chaos-intensity high")
 	assert.Contains(t, joined, "--chaos-events /tmp/e.jsonl")
 	assert.Contains(t, joined, "--chaos-summary /tmp/s.json")
+	assert.Contains(t, joined, "--chaos-window 45s", "a scenario window must reach the proxy")
 
-	// The real server must come after the separator, so wrap does not eat its args.
 	sep := indexOf(srv.Args, "--")
 	require.Positive(t, sep, "the child command must be separated by --")
 	assert.Equal(t, []string{"npx", "-y", "server-memory"}, srv.Args[sep+1:])
@@ -173,9 +160,6 @@ func TestSubstitute(t *testing.T) {
 	assert.Equal(t, []string{"agent", "-p", "do the thing", "--mcp-config", "/tmp/mcp.json"}, got)
 }
 
-// ── End to end, with a scripted reference agent ──
-
-// buildRefAgent compiles the scripted agent once per test binary.
 func buildRefAgent(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "refagent")
@@ -185,8 +169,6 @@ func buildRefAgent(t *testing.T) string {
 	return bin
 }
 
-// buildGremlyn compiles the CLI, because the generated MCP config points the
-// agent at the gremlyn binary rather than at this test process.
 func buildGremlyn(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "gremlyn")
@@ -196,8 +178,6 @@ func buildGremlyn(t *testing.T) string {
 	return bin
 }
 
-// fakeMCPServer is a shell MCP server: it answers every request with a result,
-// so any bad result the agent sees came from a gremlin.
 func fakeMCPServer() []string {
 	const script = `while IFS= read -r line; do
 	  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
@@ -232,25 +212,14 @@ func runCI(t *testing.T, gremlynBin, agentBin, mode string, gremlins []string) S
 	return runScenario(context.Background(), zerolog.Nop(), gremlynBin, cfg, sc, false)
 }
 
-// THE P0.3 GATE.
-//
-// Same seed, same gremlins, two agents whose only difference is whether they
-// react to a broken tool result. If the scores do not separate, the score is not
-// measuring the agent and everything built on it is decorative.
 func TestArenaCI_ScoreDiscriminatesRobustFromFragile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("spawns processes and compiles two binaries")
 	}
 	gremlynBin := buildGremlyn(t)
 	agentBin := buildRefAgent(t)
-
-	// timeout, not corruption. A field-dropping gremlin removes each key with a
-	// probability, so whether the agent CAN detect the fault varies run to run —
-	// which makes it the wrong instrument for a gate. A timeout always yields a
-	// JSON-RPC error, so "did the agent react" is the only variable left.
 	robust := runCI(t, gremlynBin, agentBin, "robust", []string{"timeout"})
 	fragile := runCI(t, gremlynBin, agentBin, "fragile", []string{"timeout"})
-
 	t.Logf("robust:  overall=%d coverage=%s events=%d failures=%v",
 		robust.Report.Overall, robust.Coverage, robust.Events, robust.Failures)
 	t.Logf("fragile: overall=%d coverage=%s events=%d failures=%v",
@@ -265,18 +234,14 @@ func TestArenaCI_ScoreDiscriminatesRobustFromFragile(t *testing.T) {
 		"an agent that reacts to a corrupted result must score higher than one that ignores it")
 }
 
-// Reproducibility at the report level: the same seed and the same agent must
-// produce the same score, or a CI threshold would flap and get switched off.
 func TestArenaCI_SameSeedSameScore(t *testing.T) {
 	if testing.Short() {
 		t.Skip("spawns processes and compiles two binaries")
 	}
 	gremlynBin := buildGremlyn(t)
 	agentBin := buildRefAgent(t)
-
 	first := runCI(t, gremlynBin, agentBin, "fragile", []string{"corruption"})
 	second := runCI(t, gremlynBin, agentBin, "fragile", []string{"corruption"})
-
 	require.Positive(t, first.Coverage.Injected)
 	assert.Equal(t, first.Report.Overall, second.Report.Overall,
 		"the same seed and the same agent must produce the same score")
@@ -284,8 +249,6 @@ func TestArenaCI_SameSeedSameScore(t *testing.T) {
 		"the same seed must fire the same number of injections")
 }
 
-// An agent that never calls a tool must fail the scenario rather than scoring
-// perfectly on an empty measurement.
 func TestArenaCI_AgentThatNeverCallsATool_Fails(t *testing.T) {
 	if testing.Short() {
 		t.Skip("spawns processes")
@@ -294,23 +257,18 @@ func TestArenaCI_AgentThatNeverCallsATool_Fails(t *testing.T) {
 
 	cfg := &CIConfig{
 		Agent: AgentConfig{
-			// Reads the config path and exits, exactly like an agent that decided
-			// not to use the tool.
 			Command: []string{"sh", "-c", "cat " + PlaceholderMCPConfig + " >/dev/null; exit 0"},
 			Timeout: 30 * time.Second,
 		},
 		MCPServer: MCPServerConfig{Name: "memory", Command: fakeMCPServer()},
 	}
 	sc := ScenarioConfig{Name: "no-tool-call", Gremlins: []string{"corruption"}, Seed: 1}
-
 	res := runScenario(context.Background(), zerolog.Nop(), gremlynBin, cfg, sc, false)
 
 	assert.False(t, res.Passed(), "a scenario that tested nothing must not pass")
 	require.NotEmpty(t, res.Failures)
 	assert.Contains(t, strings.Join(res.Failures, " "), "no")
 }
-
-// ── Output rendering ──
 
 func TestWriteCIResult_JSONAndFile(t *testing.T) {
 	dir := t.TempDir()
@@ -352,6 +310,7 @@ func TestWriteCIResult_Text(t *testing.T) {
 		}},
 	}
 	var buf strings.Builder
+	writeScenarioText(&buf, &result.Scenarios[0])
 	require.NoError(t, writeCIResult(&buf, "", "text", result))
 
 	got := buf.String()
@@ -361,9 +320,6 @@ func TestWriteCIResult_Text(t *testing.T) {
 	assert.Contains(t, got, "Thresholds not met")
 }
 
-// ── helpers ──
-
-// coverage builds a chaos.Coverage without repeating field names everywhere.
 func coverage(injected, observed, unresolved int) chaos.Coverage {
 	return chaos.Coverage{Injected: injected, Observed: observed, Unresolved: unresolved}
 }
@@ -419,4 +375,38 @@ thresholds:
 	require.Len(t, cfg.Scenarios, 1)
 	assert.Equal(t, int64(42), cfg.Scenarios[0].Seed)
 	assert.Equal(t, 70, cfg.Thresholds.MinOverall)
+}
+
+func TestSelectScenarios(t *testing.T) {
+	all := []ScenarioConfig{{Name: "a"}, {Name: "b"}, {Name: "c"}}
+	got, err := selectScenarios(all, nil)
+	require.NoError(t, err)
+	assert.Len(t, got, 3, "no filter runs everything")
+	got, err = selectScenarios(all, []string{"c", "a"})
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "a", got[0].Name, "config order is kept")
+	assert.Equal(t, "c", got[1].Name)
+	_, err = selectScenarios(all, []string{"a", "typo"})
+	require.Error(t, err, "a typo must not silently run zero scenarios")
+	assert.Contains(t, err.Error(), "typo")
+}
+
+func TestWriteScenarioText_Color(t *testing.T) {
+	res := ScenarioResult{Name: "x", Report: scoring.ResilienceReport{Overall: 10, Grade: scoring.GradeCritical}, Failures: []string{"too low"}}
+
+	var plain strings.Builder
+	writeScenarioText(&plain, &res)
+	assert.NotContains(t, plain.String(), "\x1b[", "no escape codes when the output is not a terminal")
+
+	t.Setenv("FORCE_COLOR", "1")
+	var colored strings.Builder
+	writeScenarioText(&colored, &res)
+	assert.Contains(t, colored.String(), "\x1b[1;31mFAIL\x1b[0m")
+	assert.Contains(t, colored.String(), "\x1b[31m✗ too low\x1b[0m")
+
+	t.Setenv("NO_COLOR", "1")
+	var off strings.Builder
+	writeScenarioText(&off, &res)
+	assert.NotContains(t, off.String(), "\x1b[", "NO_COLOR wins over FORCE_COLOR")
 }

@@ -1,24 +1,15 @@
-// Package scoring provides resilience score calculation for Gremlyn Arena
-// chaos testing sessions. All functions are pure — no side effects.
 package scoring
 
-// Dimension represents a resilience scoring dimension.
 type Dimension string
 
 const (
-	// DimensionHallucination measures unknown tool error handling.
 	DimensionHallucination Dimension = "hallucination_tolerance"
-	// DimensionLatency measures timeout and fallback behavior.
-	DimensionLatency Dimension = "latency_handling"
-	// DimensionCorruption measures input validation and error recovery.
-	DimensionCorruption Dimension = "corruption_recovery"
-	// DimensionLoop measures circuit breaker and max-retry implementation.
-	DimensionLoop Dimension = "loop_prevention"
-	// DimensionInjection measures injection resistance.
-	DimensionInjection Dimension = "injection_defense"
+	DimensionLatency       Dimension = "latency_handling"
+	DimensionCorruption    Dimension = "corruption_recovery"
+	DimensionLoop          Dimension = "loop_prevention"
+	DimensionInjection     Dimension = "injection_defense"
 )
 
-// AllDimensions lists every scoring dimension.
 var AllDimensions = []Dimension{
 	DimensionHallucination,
 	DimensionLatency,
@@ -27,7 +18,6 @@ var AllDimensions = []Dimension{
 	DimensionInjection,
 }
 
-// DefaultWeights defines equal weighting across all 5 dimensions.
 var DefaultWeights = map[Dimension]float64{
 	DimensionHallucination: 0.2,
 	DimensionLatency:       0.2,
@@ -36,7 +26,6 @@ var DefaultWeights = map[Dimension]float64{
 	DimensionInjection:     0.2,
 }
 
-// GremlinToDimension maps gremlin type names to scoring dimensions.
 var GremlinToDimension = map[string]Dimension{
 	"hallucination": DimensionHallucination,
 	"latency":       DimensionLatency,
@@ -48,21 +37,16 @@ var GremlinToDimension = map[string]Dimension{
 	"timeout":       DimensionLatency,
 }
 
-// Grade represents a human-readable resilience grade.
 type Grade string
 
 const (
-	// GradeExcellent is 90–100.
 	GradeExcellent Grade = "excellent"
-	// GradeGood is 70–89.
-	GradeGood Grade = "good"
-	// GradeNeedsWork is 40–69.
+	GradeGood      Grade = "good"
 	GradeNeedsWork Grade = "needs_work"
-	// GradeCritical is 0–39.
-	GradeCritical Grade = "critical"
+	GradeCritical  Grade = "critical"
+	GradeNoData    Grade = "no_data"
 )
 
-// GradeFromScore returns the grade for a given score (0–100).
 func GradeFromScore(score int) Grade {
 	switch {
 	case score >= 90:

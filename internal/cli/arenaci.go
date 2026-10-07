@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,15 +21,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Placeholders substituted into the agent command.
 const (
-	// PlaceholderMCPConfig is replaced by the path to the generated MCP config.
 	PlaceholderMCPConfig = "{{mcp_config}}"
-	// PlaceholderPrompt is replaced by the scenario's prompt.
-	PlaceholderPrompt = "{{prompt}}"
+	PlaceholderPrompt    = "{{prompt}}"
 )
 
-// CIConfig is the .gremlyn/arena.yaml contract.
 type CIConfig struct {
 	Agent      AgentConfig      `yaml:"agent"`
 	MCPServer  MCPServerConfig  `yaml:"mcp_server"`
@@ -36,42 +33,35 @@ type CIConfig struct {
 	Thresholds ThresholdConfig  `yaml:"thresholds"`
 }
 
-// AgentConfig describes how to launch the agent under test, headlessly.
 type AgentConfig struct {
-	// Command is the argv. It must contain {{mcp_config}} so the agent is pointed
-	// at the proxied server, and usually {{prompt}}.
-	Command []string `yaml:"command"`
-	// Timeout bounds one scenario run.
-	Timeout time.Duration `yaml:"timeout"`
-	// Env is added to the agent's environment.
-	Env map[string]string `yaml:"env"`
+	Command []string          `yaml:"command"`
+	Timeout time.Duration     `yaml:"timeout"`
+	Env     map[string]string `yaml:"env"`
 }
 
-// MCPServerConfig is the real MCP server the agent will talk to, through the
-// proxy.
 type MCPServerConfig struct {
 	Name    string   `yaml:"name"`
 	Command []string `yaml:"command"`
 }
 
-// ScenarioConfig is one chaos run.
 type ScenarioConfig struct {
-	Name      string   `yaml:"name"`
-	Gremlins  []string `yaml:"gremlins"`
-	Seed      int64    `yaml:"seed"`
-	Intensity string   `yaml:"intensity"`
-	Prompt    string   `yaml:"prompt"`
+	Name      string              `yaml:"name"`
+	Gremlins  []string            `yaml:"gremlins"`
+	Seed      int64               `yaml:"seed"`
+	Intensity string              `yaml:"intensity"`
+	Prompt    string              `yaml:"prompt"`
+	Params    chaos.GremlinParams `yaml:"params"`
+	Window    time.Duration       `yaml:"window"`
 }
 
-// ThresholdConfig is what makes the job pass or fail.
 type ThresholdConfig struct {
 	MinOverall   int                       `yaml:"min_overall"`
 	MinDimension map[scoring.Dimension]int `yaml:"min_dimension"`
 }
 
-// ScenarioResult is the outcome of one scenario.
 type ScenarioResult struct {
 	Name     string                   `json:"name"`
+	Gremlins []string                 `json:"gremlins,omitempty"`
 	Report   scoring.ResilienceReport `json:"report"`
 	Coverage chaos.Coverage           `json:"coverage"`
 	Events   int                      `json:"events"`
@@ -80,22 +70,20 @@ type ScenarioResult struct {
 	Failures []string                 `json:"failures,omitempty"`
 }
 
-// Passed reports whether the scenario met every threshold.
 func (r ScenarioResult) Passed() bool { return len(r.Failures) == 0 }
 
-// CIResult is the whole run.
 type CIResult struct {
 	Scenarios []ScenarioResult `json:"scenarios"`
 	Passed    bool             `json:"passed"`
 }
 
-// NewArenaCICmd creates the "arena ci" subcommand.
 func NewArenaCICmd(logger zerolog.Logger) *cobra.Command {
 	var (
 		configPath    string
 		outPath       string
 		format        string
 		keepArtifacts bool
+		only          []string
 	)
 
 	cmd := &cobra.Command{
@@ -114,27 +102,36 @@ call means no gremlin was crossed and nothing was measured.`,
 			if err != nil {
 				return err
 			}
+			if cfg.Scenarios, err = selectScenarios(cfg.Scenarios, only); err != nil {
+				return err
+			}
 
 			self, err := os.Executable()
 			if err != nil {
 				return fmt.Errorf("locating the gremlyn binary: %w", err)
 			}
-
 			result := CIResult{Passed: true}
+			out := cmd.OutOrStdout()
 			for _, sc := range cfg.Scenarios {
+				if format != "json" {
+					_, _ = fmt.Fprintf(out, "\n%s\n", paletteFor(out).dim(fmt.Sprintf("running %s (%s)...", sc.Name, strings.Join(sc.Gremlins, ", "))))
+				}
 				res := runScenario(cmd.Context(), logger, self, cfg, sc, keepArtifacts)
+				if format != "json" {
+					writeScenarioText(out, &res)
+				}
 				if !res.Passed() {
 					result.Passed = false
 				}
 				result.Scenarios = append(result.Scenarios, res)
 			}
 
-			if err := writeCIResult(cmd.OutOrStdout(), outPath, format, result); err != nil {
+			if err := writeCIResult(out, outPath, format, result); err != nil {
 				return err
 			}
 
 			if !result.Passed {
-				return errThresholdNotMet
+				return ErrThresholdNotMet
 			}
 			return nil
 		},
@@ -145,15 +142,42 @@ call means no gremlin was crossed and nothing was measured.`,
 		"Path to the CI scenario config")
 	cmd.Flags().StringVar(&outPath, "out", "", "Write the machine-readable report to this file")
 	cmd.Flags().StringVar(&format, "format", "text", "Console output format: text or json")
+	cmd.Flags().StringSliceVar(&only, "scenario", nil,
+		"Run only these scenarios, by name (repeatable). Default: all of them")
 	cmd.Flags().BoolVar(&keepArtifacts, "keep-artifacts", false,
 		"Keep the per-scenario temp directory (mcp config, event log) for debugging")
 
 	return cmd
 }
 
-// errThresholdNotMet is returned so the process exits non-zero without cobra
-// printing a usage block.
-var errThresholdNotMet = errors.New("resilience thresholds not met")
+func selectScenarios(all []ScenarioConfig, only []string) ([]ScenarioConfig, error) {
+	if len(only) == 0 {
+		return all, nil
+	}
+	want := make(map[string]bool, len(only))
+	for _, n := range only {
+		want[n] = true
+	}
+	var out []ScenarioConfig
+	for i := range all {
+		if want[all[i].Name] {
+			out = append(out, all[i])
+			delete(want, all[i].Name)
+		}
+	}
+	if len(want) > 0 {
+		missing := make([]string, 0, len(want))
+		for _, n := range only {
+			if want[n] {
+				missing = append(missing, n)
+			}
+		}
+		return nil, fmt.Errorf("unknown scenario(s): %s", strings.Join(missing, ", "))
+	}
+	return out, nil
+}
+
+var ErrThresholdNotMet = errors.New("resilience thresholds not met")
 
 func loadCIConfig(path string) (*CIConfig, error) {
 	data, err := os.ReadFile(path)
@@ -174,8 +198,7 @@ func validateCIConfig(cfg *CIConfig) error {
 	if len(cfg.Agent.Command) == 0 {
 		return errors.New("agent.command is required")
 	}
-	// Without this placeholder the agent would talk to its own MCP servers and
-	// never cross the proxy, so the run would measure nothing while looking fine.
+
 	if !containsPlaceholder(cfg.Agent.Command, PlaceholderMCPConfig) {
 		return fmt.Errorf("agent.command must contain %s, otherwise the agent never talks through the proxy",
 			PlaceholderMCPConfig)
@@ -193,11 +216,14 @@ func validateCIConfig(cfg *CIConfig) error {
 		if len(sc.Gremlins) == 0 {
 			return fmt.Errorf("scenario %q: at least one gremlin is required", sc.Name)
 		}
+		if sc.Window < 0 {
+			return fmt.Errorf("scenario %q: window must be positive, got %s", sc.Name, sc.Window)
+		}
 		if sc.Intensity != "" && !chaos.Intensity(sc.Intensity).Valid() {
 			return fmt.Errorf("scenario %q: unknown intensity %q", sc.Name, sc.Intensity)
 		}
-		// Fail early rather than after spawning an agent.
-		if _, err := chaos.BuildGremlins(sc.Gremlins, sc.Seed, intensityOf(sc)); err != nil {
+
+		if _, err := chaos.BuildGremlinsWithParams(sc.Gremlins, sc.Seed, intensityOf(sc), sc.Params); err != nil {
 			return fmt.Errorf("scenario %q: %w", sc.Name, err)
 		}
 	}
@@ -223,10 +249,8 @@ func containsPlaceholder(argv []string, want string) bool {
 	return false
 }
 
-// runScenario executes one scenario end to end.
 func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *CIConfig, sc ScenarioConfig, keep bool) ScenarioResult {
-	res := ScenarioResult{Name: sc.Name}
-
+	res := ScenarioResult{Name: sc.Name, Gremlins: sc.Gremlins}
 	dir, err := os.MkdirTemp("", "gremlyn-ci-"+sanitize(sc.Name)+"-")
 	if err != nil {
 		res.Failures = append(res.Failures, fmt.Sprintf("creating temp dir: %v", err))
@@ -252,7 +276,6 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 		return res
 	}
 
-	// Run the agent.
 	runCtx, cancel := context.WithTimeout(ctx, cfg.Agent.Timeout)
 	defer cancel()
 
@@ -261,7 +284,7 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 		PlaceholderPrompt:    sc.Prompt,
 	})
 
-	agentCmd := exec.CommandContext(runCtx, argv[0], argv[1:]...) //nolint:gosec // the command is the user's own config
+	agentCmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
 	agentCmd.Env = append(os.Environ(), envSlice(cfg.Agent.Env)...)
 	agentCmd.Stdin = nil
 	var agentOut strings.Builder
@@ -272,14 +295,10 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 
 	agentErr := agentCmd.Run()
 	if agentErr != nil {
-		// A non-zero agent is worth reporting but is not automatically a
-		// scenario failure: an agent may legitimately exit non-zero because a
-		// gremlin broke its task, which is the behaviour under test.
 		res.AgentErr = agentErr.Error()
 		logger.Warn().Err(agentErr).Str("scenario", sc.Name).Msg("agent exited non-zero")
 	}
 
-	// Collect what the proxy observed.
 	events, skipped, err := chaos.ReadEvents(eventsPath)
 	if err != nil {
 		res.Failures = append(res.Failures,
@@ -305,13 +324,9 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	return res
 }
 
-// checkThresholds decides whether a scenario passed.
 func checkThresholds(th ThresholdConfig, res ScenarioResult) []string {
 	var failures []string
 
-	// Coverage first. A scenario in which no gremlin was crossed measured
-	// nothing, and reporting a score for it would be the same defect as the
-	// lookup-table outcomes this whole design replaced.
 	if res.Coverage.Injected == 0 {
 		return []string{
 			"no gremlin was ever crossed: the agent made no tool call, so nothing was tested",
@@ -341,15 +356,13 @@ func checkThresholds(th ThresholdConfig, res ScenarioResult) []string {
 	return failures
 }
 
-// writeMCPConfig writes the MCP client config that points the agent at this
-// binary in chaos mode, wrapping the real server.
 func writeMCPConfig(path, self string, srv MCPServerConfig, sc ScenarioConfig, seed int64, eventsPath, summaryPath string) error {
 	name := srv.Name
 	if name == "" {
 		name = "gremlyn-target"
 	}
 
-	args := make([]string, 0, 12+len(srv.Command))
+	args := make([]string, 0, 14+len(srv.Command))
 	args = append(args,
 		"wrap",
 		"--chaos-gremlins", strings.Join(sc.Gremlins, ","),
@@ -357,8 +370,20 @@ func writeMCPConfig(path, self string, srv MCPServerConfig, sc ScenarioConfig, s
 		"--chaos-intensity", string(intensityOf(sc)),
 		"--chaos-events", eventsPath,
 		"--chaos-summary", summaryPath,
-		"--",
 	)
+	if sc.Params != (chaos.GremlinParams{}) {
+		encoded, err := json.Marshal(sc.Params)
+		if err != nil {
+			return fmt.Errorf("encoding gremlin params: %w", err)
+		}
+		args = append(args, "--chaos-params", string(encoded))
+	}
+
+	if sc.Window > 0 {
+		args = append(args, "--chaos-window", sc.Window.String())
+	}
+
+	args = append(args, "--")
 	args = append(args, srv.Command...)
 
 	cfg := map[string]any{
@@ -416,7 +441,6 @@ func tail(s string, n int) string {
 	return "…" + s[len(s)-n:]
 }
 
-// writeCIResult renders the result for humans and, optionally, for machines.
 func writeCIResult(w io.Writer, outPath, format string, result CIResult) error {
 	if outPath != "" {
 		data, err := json.MarshalIndent(result, "", "  ")
@@ -437,38 +461,45 @@ func writeCIResult(w io.Writer, outPath, format string, result CIResult) error {
 		return nil
 	}
 
-	for _, sc := range result.Scenarios {
-		status := "PASS"
-		if !sc.Passed() {
-			status = "FAIL"
-		}
-		_, _ = fmt.Fprintf(w, "\n%s  %s\n", status, sc.Name)
-		_, _ = fmt.Fprintf(w, "  resilience: %d (%s)\n", sc.Report.Overall, sc.Report.Grade)
-		_, _ = fmt.Fprintf(w, "  coverage:   %s\n", sc.Coverage)
-		_, _ = fmt.Fprintf(w, "  events:     %d\n", sc.Events)
-		if sc.Skipped > 0 {
-			_, _ = fmt.Fprintf(w, "  lost:       %d truncated event(s)\n", sc.Skipped)
-		}
-		for dim, ds := range sc.Report.Dimensions {
-			if ds.Total == 0 {
-				continue
-			}
-			_, _ = fmt.Fprintf(w, "    %-18s %3d  (survived %d, degraded %d, crashed %d)\n",
-				dim, ds.Score, ds.Survived, ds.Degraded, ds.Crashed)
-		}
-		if sc.AgentErr != "" {
-			_, _ = fmt.Fprintf(w, "  agent:      exited non-zero: %s\n", sc.AgentErr)
-		}
-		for _, f := range sc.Failures {
-			_, _ = fmt.Fprintf(w, "  ✗ %s\n", f)
-		}
-	}
-
 	_, _ = fmt.Fprintf(w, "\n")
 	if result.Passed {
-		_, _ = fmt.Fprintf(w, "All scenarios passed.\n")
+		_, _ = fmt.Fprintln(w, paletteFor(w).pass("All scenarios passed."))
 	} else {
-		_, _ = fmt.Fprintf(w, "Thresholds not met.\n")
+		_, _ = fmt.Fprintln(w, paletteFor(w).fail("Thresholds not met."))
 	}
 	return nil
+}
+
+func writeScenarioText(w io.Writer, sc *ScenarioResult) {
+	p := paletteFor(w)
+	status := p.pass("PASS")
+	if !sc.Passed() {
+		status = p.fail("FAIL")
+	}
+	_, _ = fmt.Fprintf(w, "%s  %s\n", status, p.bold(sc.Name))
+	_, _ = fmt.Fprintf(w, "  resilience: %s\n", p.grade(sc.Report.Grade, fmt.Sprintf("%d (%s)", sc.Report.Overall, sc.Report.Grade)))
+	_, _ = fmt.Fprintf(w, "  coverage:   %s\n", sc.Coverage)
+	if sc.Skipped > 0 {
+		_, _ = fmt.Fprintf(w, "  lost:       %d truncated event(s)\n", sc.Skipped)
+	}
+
+	dims := make([]string, 0, len(sc.Report.Dimensions))
+	for dim := range sc.Report.Dimensions {
+		dims = append(dims, string(dim))
+	}
+	sort.Strings(dims)
+	for _, dim := range dims {
+		ds := sc.Report.Dimensions[scoring.Dimension(dim)]
+		if ds.Total == 0 {
+			continue
+		}
+		_, _ = fmt.Fprintf(w, "    %-20s %s  %s\n", dim, p.grade(ds.Grade, fmt.Sprintf("%3d", ds.Score)),
+			p.dim(fmt.Sprintf("(survived %d, degraded %d, crashed %d)", ds.Survived, ds.Degraded, ds.Crashed)))
+	}
+	if sc.AgentErr != "" {
+		_, _ = fmt.Fprintf(w, "  agent:      exited non-zero: %s\n", sc.AgentErr)
+	}
+	for _, f := range sc.Failures {
+		_, _ = fmt.Fprintf(w, "  %s\n", p.bad("✗ "+f))
+	}
 }

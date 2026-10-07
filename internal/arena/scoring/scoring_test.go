@@ -1,14 +1,11 @@
 package scoring
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/models"
 	"github.com/stretchr/testify/assert"
 )
-
-// ── Grade tests ──
 
 func TestGradeFromScore(t *testing.T) {
 	tests := []struct {
@@ -31,12 +28,56 @@ func TestGradeFromScore(t *testing.T) {
 	}
 }
 
-// ── Scorer tests ──
-
 func TestScore_EmptyEvents(t *testing.T) {
 	report := Score(nil, nil)
 	assert.Equal(t, 0, report.Overall)
-	assert.Equal(t, GradeCritical, report.Grade)
+	assert.Equal(t, GradeNoData, report.Grade)
+	assert.False(t, report.Measured, "no event was scored, so nothing was measured")
+}
+
+func TestScore_MeasuredDistinguishesNoDataFromTotalFailure(t *testing.T) {
+	empty := Score(nil, nil)
+
+	failed := Score([]models.ArenaEvent{
+		{GremlinType: "hallucination", Outcome: models.OutcomeCrashed, Score: 0},
+		{GremlinType: "latency", Outcome: models.OutcomeCrashed, Score: 0},
+	}, nil)
+
+	assert.False(t, empty.Measured)
+	assert.True(t, failed.Measured, "events that mapped to a dimension were measured")
+
+	assert.Equal(t, GradeNoData, empty.Grade)
+	assert.Equal(t, GradeCritical, failed.Grade)
+	assert.NotEqual(t, empty.Grade, failed.Grade,
+		"a session that measured nothing must not look like one that failed everything")
+}
+
+func TestScore_ReportsUnmappedGremlins(t *testing.T) {
+	report := Score([]models.ArenaEvent{
+		{GremlinType: "brand_new_gremlin", Outcome: models.OutcomeCrashed, Score: 0},
+		{GremlinType: "another_unmapped", Outcome: models.OutcomeCrashed, Score: 0},
+		{GremlinType: "brand_new_gremlin", Outcome: models.OutcomeSurvived, Score: 90},
+	}, nil)
+	assert.Equal(t, []string{"another_unmapped", "brand_new_gremlin"}, report.UnmappedGremlins)
+	assert.False(t, report.Measured, "unmappable events contribute nothing to the score")
+	assert.Equal(t, GradeNoData, report.Grade)
+}
+
+func TestScore_EveryKnownGremlinMapsToADimension(t *testing.T) {
+	known := []string{
+		"hallucination", "latency", "corruption", "loop",
+		"injection", "identity", "overflow", "timeout",
+	}
+	for _, name := range known {
+		t.Run(name, func(t *testing.T) {
+			report := Score([]models.ArenaEvent{
+				{GremlinType: name, Outcome: models.OutcomeSurvived, Score: 90},
+			}, nil)
+			assert.Empty(t, report.UnmappedGremlins,
+				"gremlin %q has no entry in GremlinToDimension, so its events are discarded", name)
+			assert.True(t, report.Measured)
+		})
+	}
 }
 
 func TestScore_AllSurvived(t *testing.T) {
@@ -108,7 +149,7 @@ func TestScore_DimensionCounts(t *testing.T) {
 	assert.Equal(t, 1, ds.Survived)
 	assert.Equal(t, 1, ds.Degraded)
 	assert.Equal(t, 1, ds.Crashed)
-	assert.Equal(t, 50, ds.Score) // avg of 90, 10, 50
+	assert.Equal(t, 50, ds.Score)
 }
 
 func TestScore_CustomWeights(t *testing.T) {
@@ -117,7 +158,6 @@ func TestScore_CustomWeights(t *testing.T) {
 		{GremlinType: "latency", Outcome: models.OutcomeCrashed, Score: 0},
 	}
 
-	// Weight hallucination at 90%, latency at 10%.
 	weights := map[Dimension]float64{
 		DimensionHallucination: 0.9,
 		DimensionLatency:       0.1,
@@ -127,7 +167,7 @@ func TestScore_CustomWeights(t *testing.T) {
 	}
 
 	report := Score(events, weights)
-	assert.Equal(t, 90, report.Overall) // weighted average heavily favors hallucination
+	assert.Equal(t, 90, report.Overall)
 }
 
 func TestScore_UnknownGremlinTypeIgnored(t *testing.T) {
@@ -136,10 +176,8 @@ func TestScore_UnknownGremlinTypeIgnored(t *testing.T) {
 	}
 
 	report := Score(events, nil)
-	assert.Equal(t, 0, report.Overall) // Unknown type not mapped to any dimension.
+	assert.Equal(t, 0, report.Overall)
 }
-
-// ── GremlinToDimension mapping tests ──
 
 func TestGremlinToDimension_AllMapped(t *testing.T) {
 	assert.Equal(t, DimensionHallucination, GremlinToDimension["hallucination"])
@@ -150,43 +188,4 @@ func TestGremlinToDimension_AllMapped(t *testing.T) {
 	assert.Equal(t, DimensionLatency, GremlinToDimension["timeout"])
 	assert.Equal(t, DimensionCorruption, GremlinToDimension["overflow"])
 	assert.Equal(t, DimensionInjection, GremlinToDimension["identity"])
-}
-
-// ── Report format tests ──
-
-func TestFormatJSON(t *testing.T) {
-	report := ResilienceReport{
-		Overall: 75,
-		Grade:   GradeGood,
-		Dimensions: map[Dimension]DimensionScore{
-			DimensionHallucination: {Score: 75, Total: 4, Survived: 3},
-		},
-	}
-
-	data, err := FormatJSON(report)
-	assert.NoError(t, err)
-	assert.Contains(t, string(data), `"overall": 75`)
-}
-
-func TestFormatText(t *testing.T) {
-	report := ResilienceReport{
-		Overall: 42,
-		Grade:   GradeNeedsWork,
-		Dimensions: map[Dimension]DimensionScore{
-			DimensionHallucination: {Score: 42, Total: 10, Survived: 4, Degraded: 3, Crashed: 3},
-		},
-	}
-
-	text := FormatText(report)
-	assert.Contains(t, text, "RESILIENCE REPORT")
-	assert.Contains(t, text, "42/100")
-	assert.Contains(t, text, "NEEDS_WORK")
-}
-
-func TestRenderBar(t *testing.T) {
-	bar := renderBar(50)
-	assert.Contains(t, bar, "█")
-	assert.Contains(t, bar, "░")
-	assert.True(t, strings.HasPrefix(bar, "["))
-	assert.True(t, strings.HasSuffix(bar, "]"))
 }

@@ -11,22 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Gremlins used to draw from the global math/rand source, so two sessions with
-// identical configuration injected differently and produced different scores.
-// The architecture documented determinism under a seed as a fact; it was never
-// implemented. These tests pin it.
-//
-// It matters twice over: a session that cannot be replayed cannot be debugged,
-// and a score that changes between identical runs cannot gate a CI job — the
-// threshold would flap and the check would be switched off.
-
-// fixtureMessages builds a deterministic sequence of messages to inject into.
-//
-// It alternates outgoing tool calls with incoming results, because the gremlins
-// do not all act on the same thing: hallucination and identity rewrite requests,
-// while corruption, overflow and timeout rewrite responses. A response-only
-// fixture would silently never trigger half of them, and a test where the gremlin
-// never fires proves nothing.
 func fixtureMessages(n int) []*protocol.Message {
 	msgs := make([]*protocol.Message, 0, n)
 	for i := range n {
@@ -66,7 +50,6 @@ func fixtureMessages(n int) []*protocol.Message {
 	return msgs
 }
 
-// trace records, per message, whether an injection happened and what came out.
 func trace(t *testing.T, g Gremlin, msgs []*protocol.Message) []string {
 	t.Helper()
 	out := make([]string, 0, len(msgs))
@@ -78,7 +61,6 @@ func trace(t *testing.T, g Gremlin, msgs []*protocol.Message) []string {
 	return out
 }
 
-// payloadOf renders whatever the gremlin produced, on either side of the wire.
 func payloadOf(m *protocol.Message, injected bool) string {
 	if !injected || m == nil {
 		return ""
@@ -94,8 +76,6 @@ func payloadOf(m *protocol.Message, injected bool) string {
 	return ""
 }
 
-// builders constructs each gremlin at a probability that guarantees a mix of
-// injected and skipped messages, so the trace is actually discriminating.
 func builders(seed int64) map[string]Gremlin {
 	return map[string]Gremlin{
 		"corruption":    NewCorruptionGremlin(CorruptionModeMissingFields, 0.5, WithSeed(seed)),
@@ -109,7 +89,6 @@ func builders(seed int64) map[string]Gremlin {
 	}
 }
 
-// The same seed must produce the same injections, for every gremlin.
 func TestGremlins_SameSeedSameInjections(t *testing.T) {
 	msgs := fixtureMessages(24)
 
@@ -123,7 +102,6 @@ func TestGremlins_SameSeedSameInjections(t *testing.T) {
 	_ = msgs
 }
 
-// A different seed must produce a different pattern, or the seed is not wired in.
 func TestGremlins_DifferentSeedDifferentInjections(t *testing.T) {
 	for name := range builders(1) {
 		t.Run(name, func(t *testing.T) {
@@ -135,7 +113,6 @@ func TestGremlins_DifferentSeedDifferentInjections(t *testing.T) {
 	}
 }
 
-// Reproducibility must be the default, not something a caller has to opt into.
 func TestGremlins_DefaultIsReproducible(t *testing.T) {
 	first := trace(t, NewCorruptionGremlin(CorruptionModeMissingFields, 0.5), fixtureMessages(24))
 	second := trace(t, NewCorruptionGremlin(CorruptionModeMissingFields, 0.5), fixtureMessages(24))
@@ -143,15 +120,11 @@ func TestGremlins_DefaultIsReproducible(t *testing.T) {
 		"a gremlin built without an explicit seed must still be reproducible")
 }
 
-// Each gremlin draws from its own stream, so enabling one does not shift
-// another's sequence. Without this, two sessions with different gremlin sets
-// could not be compared on the gremlins they share.
 func TestGremlins_StreamsAreIndependent(t *testing.T) {
 	msgs := fixtureMessages(24)
 
 	alone := trace(t, NewCorruptionGremlin(CorruptionModeMissingFields, 0.5, WithSeed(5)), msgs)
 
-	// Draw heavily from another gremlin built with the same seed first.
 	other := NewLoopGremlin(3, "retry", 1.0, WithSeed(5))
 	for _, m := range fixtureMessages(50) {
 		_, _, _ = other.Inject(context.Background(), m)
@@ -162,8 +135,6 @@ func TestGremlins_StreamsAreIndependent(t *testing.T) {
 		"one gremlin's draws must not affect another's sequence")
 }
 
-// corruptMissingFields iterated a map, so it dropped a different set of fields on
-// every run even with a seeded source. Keys are now visited in sorted order.
 func TestCorruptionGremlin_FieldSelectionIsReproducible(t *testing.T) {
 	seen := make(map[string]struct{})
 	for range 12 {
@@ -175,8 +146,6 @@ func TestCorruptionGremlin_FieldSelectionIsReproducible(t *testing.T) {
 		"the same seed must drop the same fields: got %d distinct results", len(seen))
 }
 
-// The proxy is full duplex, so a gremlin can be reached from two goroutines at
-// once. Run under -race, this catches an unlocked *rand.Rand.
 func TestGremlins_ConcurrentInjectIsSafe(t *testing.T) {
 	for name, g := range builders(21) {
 		t.Run(name, func(t *testing.T) {

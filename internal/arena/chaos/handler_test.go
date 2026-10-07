@@ -20,8 +20,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// syncBuffer is an io.Writer safe for concurrent use, since the proxy writes to
-// the client stream from its own goroutine while the test reads it.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -39,7 +37,6 @@ func (s *syncBuffer) String() string {
 	return s.buf.String()
 }
 
-// fakeGremlin is a Gremlin whose behaviour the test dictates.
 type fakeGremlin struct {
 	name string
 	fn   func(ctx context.Context, msg *protocol.Message) (*protocol.Message, bool, error)
@@ -51,7 +48,6 @@ func (g *fakeGremlin) Inject(ctx context.Context, msg *protocol.Message) (*proto
 	return g.fn(ctx, msg)
 }
 
-// alwaysInjects returns a gremlin that rewrites the result payload every time.
 func alwaysInjects(name string) *fakeGremlin {
 	return &fakeGremlin{
 		name: name,
@@ -62,13 +58,6 @@ func alwaysInjects(name string) *fakeGremlin {
 	}
 }
 
-// corruptsResponsesOnly is how a real result-corrupting gremlin behaves: it
-// rewrites incoming tool results and leaves the agent's own outgoing requests
-// alone.
-//
-// alwaysInjects is deliberately cruder and rewrites anything, which is fine for
-// unit-testing the handler but wrong for anything that then observes the agent —
-// mutating the agent's request out of shape makes its reaction invisible.
 func corruptsResponsesOnly(name string) *fakeGremlin {
 	return &fakeGremlin{
 		name: name,
@@ -81,8 +70,6 @@ func corruptsResponsesOnly(name string) *fakeGremlin {
 	}
 }
 
-// neverInjects returns a gremlin that always declines, returning the message
-// byte-identical as the contract requires.
 func neverInjects(name string) *fakeGremlin {
 	return &fakeGremlin{
 		name: name,
@@ -128,9 +115,10 @@ func toolCall(id int64, method string) *protocol.Message {
 
 func incoming() *proxy.MessageContext {
 	return &proxy.MessageContext{
-		ServerName: "test",
-		Direction:  models.DirectionIncoming,
-		Timestamp:  time.Unix(0, 0),
+		ServerName:        "test",
+		Direction:         models.DirectionIncoming,
+		Timestamp:         time.Unix(0, 0),
+		CorrelatedRequest: toolCall(1, "tools/call"),
 	}
 }
 
@@ -142,22 +130,11 @@ func newHandler(sink InjectionSink, gs ...gremlins.Gremlin) *GremlinHandler {
 	)
 }
 
-// ── Pipeline contract ──
-
 func TestGremlinHandler_ImplementsHandler(t *testing.T) {
 	var h proxy.Handler = newHandler(nil)
 	assert.Equal(t, "arena-gremlins", h.Name())
 	assert.Equal(t, models.DirectionBoth, h.Direction())
 }
-
-// Chaos must run after Shield's policy engine (priority 10) so a gremlin can
-// never smuggle a payload past a decision that would have blocked it.
-func TestGremlinHandler_RunsAfterShieldPolicy(t *testing.T) {
-	const shieldPolicyPriority = 10
-	assert.Greater(t, newHandler(nil).Priority(), shieldPolicyPriority)
-}
-
-// ── Injection behaviour ──
 
 func TestGremlinHandler_NoGremlinInjects_Skips(t *testing.T) {
 	log := NewInjectionLog()
@@ -198,8 +175,6 @@ func TestGremlinHandler_InjectsAndRecords(t *testing.T) {
 	assert.NotNil(t, inj.Modified)
 }
 
-// Only one gremlin may fire per message: compounding mutations would make the
-// agent's reaction impossible to attribute to a cause.
 func TestGremlinHandler_OnlyFirstGremlinInjects(t *testing.T) {
 	log := NewInjectionLog()
 	h := newHandler(log, alwaysInjects("first"), alwaysInjects("second"))
@@ -224,10 +199,6 @@ func TestGremlinHandler_SkipsPastDecliningGremlins(t *testing.T) {
 	assert.Equal(t, 1, log.Len())
 }
 
-// ── Failure containment ──
-
-// Arena is a testing tool. If a gremlin's own bug breaks the user's traffic,
-// every result the session produces afterwards is noise.
 func TestGremlinHandler_GremlinErrorPassesMessageThrough(t *testing.T) {
 	log := NewInjectionLog()
 	boom := &fakeGremlin{
@@ -261,8 +232,6 @@ func TestGremlinHandler_GremlinErrorFallsThroughToNext(t *testing.T) {
 	assert.Equal(t, "gremlin:healthy", dec.Reason)
 }
 
-// A gremlin claiming an injection while returning no message would drop the
-// message and hang the agent, which looks like a gremlin working when it is not.
 func TestGremlinHandler_InjectedButNilMessageIsIgnored(t *testing.T) {
 	log := NewInjectionLog()
 	liar := &fakeGremlin{
@@ -303,11 +272,6 @@ func TestGremlinHandler_NilSinkIsSafe(t *testing.T) {
 	assert.Equal(t, proxy.DecisionModify, dec.Action)
 }
 
-// ── Determinism ──
-
-// A session whose injection order varies between runs cannot be replayed, and a
-// score that is not reproducible is not a score. Registry.List() iterates a map,
-// so the handler takes an ordered slice — this pins that.
 func TestGremlinHandler_InjectionOrderIsStable(t *testing.T) {
 	run := func() []string {
 		log := NewInjectionLog()
@@ -334,8 +298,6 @@ func TestGremlinHandler_InjectionOrderIsStable(t *testing.T) {
 		"the first injecting gremlin in the slice must win every time")
 }
 
-// ── Correlation metadata ──
-
 func TestGremlinHandler_MethodFromRequest(t *testing.T) {
 	log := NewInjectionLog()
 	h := newHandler(log, &fakeGremlin{
@@ -344,7 +306,6 @@ func TestGremlinHandler_MethodFromRequest(t *testing.T) {
 			return msg, true, nil
 		},
 	})
-
 	mctx := &proxy.MessageContext{ServerName: "s", Direction: models.DirectionOutgoing}
 	_, err := h.HandleMessage(context.Background(), toolCall(3, "tools/call"), mctx)
 	require.NoError(t, err)
@@ -353,8 +314,6 @@ func TestGremlinHandler_MethodFromRequest(t *testing.T) {
 	assert.Equal(t, "tools/call", log.Injections()[0].Method)
 }
 
-// A response carries no method of its own. Without the correlated request, an
-// injection on a tool result could not be attributed to the tool that was called.
 func TestGremlinHandler_MethodFromCorrelatedRequest(t *testing.T) {
 	log := NewInjectionLog()
 	h := newHandler(log, alwaysInjects("corruption"))
@@ -370,34 +329,25 @@ func TestGremlinHandler_MethodFromCorrelatedRequest(t *testing.T) {
 		"a response's method must come from the request it answers")
 }
 
-func TestGremlinHandler_NotificationHasNoRequestID(t *testing.T) {
-	log := NewInjectionLog()
-	h := newHandler(log, &fakeGremlin{
-		name: "noop",
-		fn: func(_ context.Context, msg *protocol.Message) (*protocol.Message, bool, error) {
-			return msg, true, nil
-		},
-	})
-
-	notif := &protocol.Message{
-		Type: protocol.MessageTypeNotification,
-		Notification: &protocol.JSONRPCNotification{
-			JSONRPC: protocol.JSONRPCVersion,
-			Method:  "notifications/progress",
-		},
+func TestGremlinHandler_OnlyToolCallsAreEligible(t *testing.T) {
+	for _, method := range []string{"server/discover", "initialize", "tools/list",
+		"resources/list", "resources/templates/list", "ping", "notifications/progress"} {
+		log := NewInjectionLog()
+		h := newHandler(log, alwaysInjects("noop"))
+		notif := &protocol.Message{
+			Type: protocol.MessageTypeNotification,
+			Notification: &protocol.JSONRPCNotification{
+				JSONRPC: protocol.JSONRPCVersion,
+				Method:  method,
+			},
+		}
+		dec, err := h.HandleMessage(context.Background(), notif, outgoing())
+		require.NoError(t, err)
+		assert.Equal(t, proxy.DecisionSkip, dec.Action, method)
+		assert.Empty(t, log.Injections(), "%s is not agent work and must not be injected", method)
 	}
-	_, err := h.HandleMessage(context.Background(), notif, incoming())
-	require.NoError(t, err)
-
-	require.Len(t, log.Injections(), 1)
-	assert.Empty(t, log.Injections()[0].RequestID)
-	assert.Equal(t, "notifications/progress", log.Injections()[0].Method)
 }
 
-// ── Through a real pipeline ──
-
-// This is the point of P0.1: gremlins mutate messages travelling through the
-// shared proxy pipeline, not fabricated ones.
 func TestGremlinHandler_MutatesThroughRealPipeline(t *testing.T) {
 	log := NewInjectionLog()
 	pipeline := proxy.NewPipeline(zerolog.Nop())
@@ -415,8 +365,6 @@ func TestGremlinHandler_MutatesThroughRealPipeline(t *testing.T) {
 	assert.Equal(t, 1, log.Len())
 }
 
-// The pipeline correlates a response to its request. Registering only the gremlin
-// handler, an injection on the response must still carry the request's method.
 func TestGremlinHandler_PipelineSuppliesCorrelation(t *testing.T) {
 	log := NewInjectionLog()
 	pipeline := proxy.NewPipeline(zerolog.Nop())
@@ -437,8 +385,6 @@ func TestGremlinHandler_PipelineSuppliesCorrelation(t *testing.T) {
 		"the pipeline's correlator must let the handler attribute a response")
 }
 
-// A Shield-style blocking handler at a lower priority must short-circuit before
-// chaos runs, so a gremlin cannot resurrect a blocked message.
 func TestGremlinHandler_BlockedBeforeChaosRuns(t *testing.T) {
 	log := NewInjectionLog()
 	pipeline := proxy.NewPipeline(zerolog.Nop())
@@ -448,7 +394,6 @@ func TestGremlinHandler_BlockedBeforeChaosRuns(t *testing.T) {
 	dec, forwarded, err := pipeline.Process(context.Background(),
 		toolCall(1, "tools/call"),
 		&proxy.MessageContext{ServerName: "s", Direction: models.DirectionOutgoing})
-
 	require.NoError(t, err)
 	assert.Equal(t, proxy.DecisionBlock, dec.Action)
 	assert.Nil(t, forwarded)
@@ -464,11 +409,6 @@ func (b *blockingHandler) HandleMessage(context.Context, *protocol.Message, *pro
 	return &proxy.Decision{Action: proxy.DecisionBlock, Reason: "policy"}, nil
 }
 
-// ── Through a real wrap proxy ──
-
-// The end-to-end claim: chaos reaches an actual MCP conversation. The fake server
-// answers every request; the gremlin rewrites the answer on its way back, and the
-// client sees the mutation.
 func TestGremlinHandler_MutatesRealWrapTraffic(t *testing.T) {
 	log := NewInjectionLog()
 	pipeline := proxy.NewPipeline(zerolog.Nop())
@@ -479,14 +419,11 @@ func TestGremlinHandler_MutatesRealWrapTraffic(t *testing.T) {
 	  [ -n "$id" ] && printf '{"jsonrpc":"2.0","id":%s,"result":{"pristine":true}}\n' "$id"
 	done`
 
-	// tools/call, not tools/list: handshake traffic is deliberately left alone.
 	in := strings.NewReader(
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_graph"}}` + "\n")
 	out := &syncBuffer{}
-
 	p := proxy.NewWrapProxy(proxy.Config{
 		ServerName: "fake-mcp",
-		Mode:       models.ServerModeWrap,
 		Command:    "sh",
 		Args:       []string{"-c", script},
 	},

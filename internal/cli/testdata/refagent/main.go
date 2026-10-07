@@ -1,16 +1,3 @@
-// Command refagent is a minimal, scripted MCP agent used to test Arena itself.
-//
-// It exists because a real LLM agent is the wrong instrument for validating a
-// measurement: it is nondeterministic, costs money per run, and its behaviour
-// changes under you. To check that the resilience score actually discriminates
-// between a robust and a fragile agent, the two behaviours have to be fixed and
-// known — which is exactly what this program provides.
-//
-//	--mode=robust    notices a bad tool result and retries the same tool
-//	--mode=fragile   accepts whatever comes back and stops
-//
-// It speaks the same wire format as any MCP client: newline-delimited JSON-RPC
-// over the child's stdio.
 package main
 
 import (
@@ -76,7 +63,6 @@ func run(mode, cfgPath, tool, expectKey string, retries int) error {
 		return fmt.Errorf("no mcpServers in %s", cfgPath)
 	}
 
-	// Deterministic pick: the config the harness writes has exactly one server.
 	var command string
 	var args []string
 	for _, s := range cfg.MCPServers {
@@ -84,7 +70,7 @@ func run(mode, cfgPath, tool, expectKey string, retries int) error {
 		break
 	}
 
-	cmd := exec.Command(command, args...) //nolint:gosec // the command comes from our own generated config
+	cmd := exec.Command(command, args...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("stdin pipe: %w", err)
@@ -105,7 +91,6 @@ func run(mode, cfgPath, tool, expectKey string, retries int) error {
 	r := bufio.NewReaderSize(stdout, 1<<20)
 	id := 0
 	next := func() *int { id++; v := id; return &v }
-
 	send := func(m rpc) error {
 		m.JSONRPC = "2.0"
 		b, err := json.Marshal(m)
@@ -135,18 +120,15 @@ func run(mode, cfgPath, tool, expectKey string, retries int) error {
 			}
 			var m rpc
 			if err := json.Unmarshal([]byte(line), &m); err != nil {
-				// Corrupted framing is itself something a gremlin may cause; skip
-				// the line rather than dying, which is the robust behaviour.
 				continue
 			}
 			if m.ID == nil && m.Method != "" {
-				continue // a notification from the server
+				continue
 			}
 			return &m, nil
 		}
 	}
 
-	// Handshake.
 	if err := send(rpc{ID: next(), Method: "initialize", Params: map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
@@ -167,7 +149,6 @@ func run(mode, cfgPath, tool, expectKey string, retries int) error {
 		return fmt.Errorf("tools/list: %w", err)
 	}
 
-	// Call the tool, then react according to the configured behaviour.
 	attempts := 1
 	if mode == "robust" {
 		attempts += retries
@@ -183,7 +164,6 @@ func run(mode, cfgPath, tool, expectKey string, retries int) error {
 
 		resp, err := read()
 		if err != nil {
-			// No answer at all. A robust agent retries; a fragile one gives up.
 			if mode == "robust" && attempt < attempts-1 {
 				continue
 			}
@@ -191,27 +171,15 @@ func run(mode, cfgPath, tool, expectKey string, retries int) error {
 		}
 
 		if !suspicious(resp, expectKey) {
-			return nil // the result looked fine: nothing to react to
+			return nil
 		}
 		if mode != "robust" {
-			// The fragile agent accepts the bad result and stops. This is the
-			// behaviour Arena is meant to catch.
 			return nil
 		}
 	}
 	return nil
 }
 
-// suspicious reports whether a tool result looks wrong enough to warrant a retry.
-//
-// The rule is fixed and explainable, not clever: an error, an empty or
-// unparseable payload, or a payload missing a key the caller knows it asked for.
-//
-// That last check is the one that matters. A field-dropping gremlin leaves
-// perfectly valid JSON behind, so an agent that only asks "does this parse?"
-// cannot tell a corrupted result from a good one — and then a robust agent and a
-// fragile one behave identically, which is exactly what the discriminance gate
-// caught the first time it ran.
 func suspicious(m *rpc, expectKey string) bool {
 	if m.Error != nil {
 		return true

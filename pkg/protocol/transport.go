@@ -8,61 +8,40 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
-	"strconv"
-	"strings"
 	"sync"
 )
 
-// Transport abstracts how JSON-RPC messages are physically read and written,
-// so the proxy logic does not care whether it talks over stdio pipes or HTTP connections.
 type Transport interface {
-	// ReadMessage blocks until a message is available and returns it parsed.
-	// Returns io.EOF on clean shutdown.
 	ReadMessage(ctx context.Context) (*Message, error)
-
-	// WriteMessage sends a message to the other side.
 	WriteMessage(ctx context.Context, msg *Message) error
-
-	// Close performs a clean shutdown of the transport.
 	Close() error
 }
 
-// --- Line Framing (MCP over stdio) ---
+const MaxLineBytes = 16 << 20
 
-// MaxLineBytes caps a single newline-delimited message.
-//
-// The peer is an MCP server whose output is attacker-controlled as far as we are
-// concerned, and this proxy sits inline with the user's agent: an unbounded read
-// here is a memory DoS. The cap is generous because legitimate tool results can
-// be large (file contents, query results).
-const MaxLineBytes = 16 << 20 // 16 MiB
+type LineFramer struct {
+	Limit int64
+}
 
-// LineFramer handles newline-delimited JSON-RPC messages, which is the framing
-// MCP uses over stdio: exactly one JSON object per line, and messages must not
-// contain embedded newlines.
-//
-// This is deliberately NOT Content-Length framing. That belongs to LSP, and
-// confusing the two is easy because MCP borrowed much of its shape from LSP —
-// but a Content-Length reader cannot parse a single byte a real MCP server emits.
-type LineFramer struct{}
+func (f *LineFramer) limit() int64 {
+	if f.Limit > 0 && f.Limit <= MaxLineBytes {
+		return f.Limit
+	}
+	return MaxLineBytes
+}
 
-// ReadFrame reads one newline-delimited message, skipping blank lines.
 func (f *LineFramer) ReadFrame(reader *bufio.Reader) ([]byte, error) {
 	for {
-		line, err := readLimitedLine(reader, MaxLineBytes)
+		line, err := readLimitedLine(reader, int(f.limit()))
 		if err != nil {
 			return nil, err
 		}
 
 		line = bytes.TrimRight(line, "\r\n")
 		if len(bytes.TrimSpace(line)) == 0 {
-			continue // blank keep-alive line, not a message
+			continue
 		}
 
-		// A Content-Length header means we are talking to an LSP-style peer.
-		// Say so plainly rather than failing as a JSON parse error three frames
-		// later — this misdiagnosis has cost real debugging time before.
 		if hasPrefixFold(line, []byte("content-length:")) {
 			return nil, fmt.Errorf(
 				"peer is using LSP Content-Length framing, but MCP over stdio is newline-delimited JSON")
@@ -72,15 +51,12 @@ func (f *LineFramer) ReadFrame(reader *bufio.Reader) ([]byte, error) {
 	}
 }
 
-// WriteFrame writes one newline-delimited message.
 func (f *LineFramer) WriteFrame(writer io.Writer, data []byte) error {
-	// A message carrying a raw newline would be read back as two truncated
-	// frames by any conforming peer, so refuse rather than corrupt the stream.
 	if bytes.ContainsAny(data, "\n\r") {
 		return fmt.Errorf("message contains an embedded newline, which MCP stdio framing forbids")
 	}
-	if len(data)+1 > MaxLineBytes {
-		return fmt.Errorf("message is %d bytes, over the %d byte frame limit", len(data), MaxLineBytes)
+	if int64(len(data))+1 > f.limit() {
+		return fmt.Errorf("message is %d bytes, over the %d byte frame limit", len(data), f.limit())
 	}
 	if _, err := writer.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("writing frame: %w", err)
@@ -88,8 +64,6 @@ func (f *LineFramer) WriteFrame(writer io.Writer, data []byte) error {
 	return nil
 }
 
-// readLimitedLine reads up to and including '\n', failing if the line exceeds
-// limit rather than growing without bound.
 func readLimitedLine(reader *bufio.Reader, limit int) ([]byte, error) {
 	var out []byte
 	for {
@@ -102,10 +76,10 @@ func readLimitedLine(reader *bufio.Reader, limit int) ([]byte, error) {
 			return out, nil
 		}
 		if errors.Is(err, bufio.ErrBufferFull) {
-			continue // long line, keep accumulating
+			continue
 		}
 		if errors.Is(err, io.EOF) && len(out) > 0 {
-			return out, nil // final line without a trailing newline
+			return out, nil
 		}
 		return nil, err
 	}
@@ -118,83 +92,6 @@ func hasPrefixFold(b, prefix []byte) bool {
 	return bytes.EqualFold(b[:len(prefix)], prefix)
 }
 
-// --- Content-Length Framing (LSP, not MCP) ---
-
-// ContentLengthFramer handles content-length framed JSON-RPC messages, the
-// framing used by LSP. Format: Content-Length: N\r\n\r\n{json}
-//
-// MCP over stdio does NOT use this — see LineFramer. Kept for peers that speak
-// the LSP style.
-type ContentLengthFramer struct{}
-
-// ReadFrame reads one content-length-framed message from the reader.
-func (f *ContentLengthFramer) ReadFrame(reader *bufio.Reader) ([]byte, error) {
-	// Read headers until we find a blank line.
-	var contentLength int
-	foundContentLength := false
-
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return nil, fmt.Errorf("reading frame header: %w", err)
-		}
-
-		line = strings.TrimRight(line, "\r\n")
-
-		// Blank line signals end of headers.
-		if line == "" {
-			break
-		}
-
-		// Parse Content-Length header.
-		if strings.HasPrefix(strings.ToLower(line), "content-length:") {
-			valStr := strings.TrimSpace(line[len("content-length:"):])
-			val, err := strconv.Atoi(valStr)
-			if err != nil {
-				return nil, fmt.Errorf("invalid content-length value %q: %w", valStr, err)
-			}
-			contentLength = val
-			foundContentLength = true
-		}
-	}
-
-	if !foundContentLength {
-		return nil, fmt.Errorf("missing Content-Length header")
-	}
-
-	if contentLength <= 0 {
-		return nil, fmt.Errorf("invalid Content-Length: %d", contentLength)
-	}
-
-	// Read exactly contentLength bytes.
-	body := make([]byte, contentLength)
-	_, err := io.ReadFull(reader, body)
-	if err != nil {
-		return nil, fmt.Errorf("reading frame body (%d bytes): %w", contentLength, err)
-	}
-
-	return body, nil
-}
-
-// WriteFrame writes one content-length-framed message to the writer.
-func (f *ContentLengthFramer) WriteFrame(writer io.Writer, data []byte) error {
-	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(data))
-	_, err := io.WriteString(writer, header)
-	if err != nil {
-		return fmt.Errorf("writing frame header: %w", err)
-	}
-	_, err = writer.Write(data)
-	if err != nil {
-		return fmt.Errorf("writing frame body: %w", err)
-	}
-	return nil
-}
-
-// --- Stdio Transport ---
-
-// StdioTransport implements Transport for stdio-based MCP communication.
-// Messages are newline-delimited JSON-RPC over stdin/stdout, per the MCP stdio
-// transport.
 type StdioTransport struct {
 	reader  *bufio.Reader
 	writer  io.Writer
@@ -204,15 +101,25 @@ type StdioTransport struct {
 	closeMu sync.Mutex
 }
 
-// NewStdioTransport creates a new StdioTransport from the given reader and writer.
-func NewStdioTransport(r io.Reader, w io.Writer) *StdioTransport {
-	return &StdioTransport{
-		reader: bufio.NewReaderSize(r, 64*1024),
-		writer: w,
+func WithFrameLimit(limit int64) StdioOption {
+	return func(t *StdioTransport) {
+		t.framer.Limit = limit
 	}
 }
 
-// ReadMessage reads one content-length-framed JSON-RPC message from the reader.
+type StdioOption func(*StdioTransport)
+
+func NewStdioTransport(r io.Reader, w io.Writer, opts ...StdioOption) *StdioTransport {
+	t := &StdioTransport{
+		reader: bufio.NewReaderSize(r, 64*1024),
+		writer: w,
+	}
+	for _, opt := range opts {
+		opt(t)
+	}
+	return t
+}
+
 func (t *StdioTransport) ReadMessage(_ context.Context) (*Message, error) {
 	t.closeMu.Lock()
 	if t.closed {
@@ -234,7 +141,6 @@ func (t *StdioTransport) ReadMessage(_ context.Context) (*Message, error) {
 	return msg, nil
 }
 
-// WriteMessage writes one content-length-framed JSON-RPC message to the writer.
 func (t *StdioTransport) WriteMessage(_ context.Context, msg *Message) error {
 	t.closeMu.Lock()
 	if t.closed {
@@ -254,7 +160,6 @@ func (t *StdioTransport) WriteMessage(_ context.Context, msg *Message) error {
 	return t.framer.WriteFrame(t.writer, data)
 }
 
-// Close shuts down the transport.
 func (t *StdioTransport) Close() error {
 	t.closeMu.Lock()
 	defer t.closeMu.Unlock()
@@ -262,175 +167,7 @@ func (t *StdioTransport) Close() error {
 	return nil
 }
 
-// --- HTTP Transport ---
-
-// HTTPTransport implements Transport for HTTP/SSE-based MCP communication.
-// Sends requests via POST and reads SSE streams for server-initiated messages.
-type HTTPTransport struct {
-	baseURL string
-	client  *http.Client
-	sseBody io.ReadCloser // SSE response body to close on shutdown
-	msgCh   chan *Message // buffered channel for received SSE messages
-	errCh   chan error    // channel for SSE read errors
-	writeMu sync.Mutex
-	closed  bool
-	closeMu sync.Mutex
-}
-
-// NewHTTPTransport creates a new HTTPTransport that sends requests to the given base URL.
-func NewHTTPTransport(baseURL string, client *http.Client) *HTTPTransport {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	return &HTTPTransport{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  client,
-		msgCh:   make(chan *Message, 64),
-		errCh:   make(chan error, 1),
-	}
-}
-
-// ReadMessage reads the next message from the SSE stream or message channel.
-func (t *HTTPTransport) ReadMessage(ctx context.Context) (*Message, error) {
-	t.closeMu.Lock()
-	if t.closed {
-		t.closeMu.Unlock()
-		return nil, io.EOF
-	}
-	t.closeMu.Unlock()
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case msg := <-t.msgCh:
-		return msg, nil
-	case err := <-t.errCh:
-		return nil, err
-	}
-}
-
-// WriteMessage sends a JSON-RPC message as an HTTP POST to the upstream server.
-// The response is parsed and enqueued for ReadMessage.
-func (t *HTTPTransport) WriteMessage(ctx context.Context, msg *Message) error {
-	t.closeMu.Lock()
-	if t.closed {
-		t.closeMu.Unlock()
-		return fmt.Errorf("transport closed")
-	}
-	t.closeMu.Unlock()
-
-	data, err := serializeMessage(msg)
-	if err != nil {
-		return fmt.Errorf("http serialize: %w", err)
-	}
-
-	t.writeMu.Lock()
-	defer t.writeMu.Unlock()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.baseURL, strings.NewReader(string(data)))
-	if err != nil {
-		return fmt.Errorf("http create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-
-	resp, err := t.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("http send: %w", err)
-	}
-
-	contentType := resp.Header.Get("Content-Type")
-
-	if strings.HasPrefix(contentType, "text/event-stream") {
-		// SSE response — read events in a goroutine.
-		t.sseBody = resp.Body
-		go t.readSSEStream(resp.Body)
-		return nil
-	}
-
-	// Regular JSON response.
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("http read response: %w", err)
-	}
-
-	if len(body) == 0 {
-		return nil
-	}
-
-	respMsg, err := parseRawMessage(body)
-	if err != nil {
-		return fmt.Errorf("http parse response: %w", err)
-	}
-
-	t.msgCh <- respMsg
-	return nil
-}
-
-// Close shuts down the transport.
-func (t *HTTPTransport) Close() error {
-	t.closeMu.Lock()
-	defer t.closeMu.Unlock()
-	t.closed = true
-
-	if t.sseBody != nil {
-		return t.sseBody.Close()
-	}
-	return nil
-}
-
-// readSSEStream reads Server-Sent Events from the given reader and enqueues parsed messages.
-func (t *HTTPTransport) readSSEStream(body io.ReadCloser) {
-	defer func() { _ = body.Close() }()
-	scanner := bufio.NewScanner(body)
-	var dataLines []string
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if strings.HasPrefix(line, "data: ") {
-			dataLines = append(dataLines, strings.TrimPrefix(line, "data: "))
-			continue
-		}
-
-		// Blank line = end of event.
-		if line == "" && len(dataLines) > 0 {
-			data := strings.Join(dataLines, "\n")
-			dataLines = nil
-
-			msg, err := parseRawMessage([]byte(data))
-			if err != nil {
-				// Skip unparseable events.
-				continue
-			}
-
-			t.closeMu.Lock()
-			closed := t.closed
-			t.closeMu.Unlock()
-			if closed {
-				return
-			}
-
-			t.msgCh <- msg
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		t.closeMu.Lock()
-		closed := t.closed
-		t.closeMu.Unlock()
-		if !closed {
-			t.errCh <- fmt.Errorf("sse stream: %w", err)
-		}
-	}
-}
-
-// --- Shared helpers ---
-
-// parseRawMessage parses raw JSON bytes into a Message by detecting the message type.
 func parseRawMessage(data []byte) (*Message, error) {
-	// Use a map to detect which fields are present.
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("invalid JSON: %w", err)
@@ -440,12 +177,9 @@ func parseRawMessage(data []byte) (*Message, error) {
 	_, hasMethod := raw["method"]
 	_, hasResult := raw["result"]
 	_, hasError := raw["error"]
-
 	msg := &Message{Raw: data}
-
 	switch {
 	case hasMethod && hasID:
-		// Check if id is null — null id means it is actually a notification.
 		if string(raw["id"]) == "null" {
 			var notif JSONRPCNotification
 			if err := json.Unmarshal(data, &notif); err != nil {
@@ -485,7 +219,6 @@ func parseRawMessage(data []byte) (*Message, error) {
 	return msg, nil
 }
 
-// serializeMessage converts a Message back to JSON bytes.
 func serializeMessage(msg *Message) ([]byte, error) {
 	switch msg.Type {
 	case MessageTypeRequest:
@@ -511,7 +244,6 @@ func serializeMessage(msg *Message) ([]byte, error) {
 	}
 }
 
-// keysOf returns the keys of a map for error messages.
 func keysOf(m map[string]json.RawMessage) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

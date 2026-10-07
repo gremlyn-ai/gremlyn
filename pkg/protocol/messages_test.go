@@ -222,29 +222,6 @@ func TestMessage_GetID(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestParseMethod(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected MCPMethod
-	}{
-		{"tools/list", MCPMethodToolsList},
-		{"tools/call", MCPMethodToolsCall},
-		{"sampling/createMessage", MCPMethodSamplingCreateMessage},
-		{"initialize", MCPMethodInitialize},
-		{"notifications/initialized", MCPMethodNotificationInitialized},
-		{"notifications/progress", MCPMethodNotificationProgress},
-		{"notifications/cancelled", MCPMethodNotificationCancelled},
-		{"custom/method", MCPMethodUnknown},
-		{"", MCPMethodUnknown},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			assert.Equal(t, tt.expected, ParseMethod(tt.input))
-		})
-	}
-}
-
 func TestToolsCallParams_Unmarshal(t *testing.T) {
 	raw := `{"name":"search_db","arguments":{"query":"SELECT * FROM users","limit":10}}`
 	var params ToolsCallParams

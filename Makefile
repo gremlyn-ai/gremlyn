@@ -14,36 +14,32 @@ LDFLAGS := -s -w \
 
 GOBUILD := CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)"
 
-.PHONY: all build gremlyn shield arena test test-verbose integration lint vet fmt \
-        coverage check clean run-shield run-arena dashboard-check tidy
+.PHONY: all build test test-verbose integration lint vet fmt \
+        coverage check clean tidy vulncheck plugin-check
 
 all: build
 
-## build — all three binaries into $(BINDIR)/
-build: gremlyn shield arena
-
-gremlyn:
+build:
 	$(GOBUILD) -o $(BINDIR)/gremlyn ./cmd/gremlyn
 
-shield:
-	$(GOBUILD) -o $(BINDIR)/shield ./cmd/shield
-
-arena:
-	$(GOBUILD) -o $(BINDIR)/arena ./cmd/arena
-
-## test — unit tests with the race detector (the gate)
 test:
 	$(GO) test ./... -race -coverprofile=coverage.out
 
 test-verbose:
 	$(GO) test ./... -race -v
 
-## integration — needs docker compose up -d postgres redis
 integration:
 	$(GO) test -tags=integration ./... -race
 
 lint:
 	golangci-lint run
+
+vulncheck:
+	@command -v govulncheck >/dev/null 2>&1 || { \
+		echo "installing govulncheck..."; \
+		$(GO) install golang.org/x/vuln/cmd/govulncheck@latest; \
+	}
+	$(shell $(GO) env GOPATH)/bin/govulncheck ./... || govulncheck ./...
 
 vet:
 	$(GO) vet ./...
@@ -56,22 +52,16 @@ coverage: test
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "coverage.html written"
 
-## check — THE gate. Run before every commit.
-check: vet lint test
+check: vet lint test vulncheck
 	@echo "All checks passed"
 
 tidy:
 	$(GO) mod tidy
 
-## dashboard-check — the frontend gate
-dashboard-check:
-	cd dashboard && npm run typecheck && npm run lint && npx vitest run && npm run build
-
-run-shield: shield
-	./$(BINDIR)/shield
-
-run-arena: arena
-	./$(BINDIR)/arena
+plugin-check:
+	claude plugin validate .
+	sh -n scripts/gremlyn
+	sh -n install.sh
 
 clean:
 	rm -rf $(BINDIR) dist coverage.out coverage.html

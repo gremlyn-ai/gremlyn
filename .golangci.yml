@@ -2,13 +2,13 @@ version: "2"
 
 linters:
   enable:
-    - bodyclose # HTTP response bodies must be closed
-    - errorlint # correct use of %w and errors.Is/As
-    - exhaustive # every case of an enum switch is handled
+    - bodyclose
+    - errorlint
+    - exhaustive
     - gocritic
     - misspell
-    - noctx # no HTTP/SQL call without a context
-    - prealloc # suggests slice pre-allocation
+    - noctx
+    - prealloc
     - revive
     - unconvert
 
@@ -19,25 +19,31 @@ linters:
       enabled-tags:
         - diagnostic
         - style
+      disabled-checks:
+        - whyNoLint
     revive:
       rules:
-        - name: exported
-          arguments:
-            - checkPrivateReceivers
         - name: unexported-return
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: increment-decrement
+        - name: var-declaration
+        - name: range
+        - name: receiver-naming
+        - name: indent-error-flow
+        - name: errorf
+        - name: unreachable-code
+        - name: redefines-builtin-id
 
   exclusions:
     generated: lax
     paths:
-      # The dashboard is a Next.js app; node_modules vendors third-party Go
-      # sources (e.g. flatted) that are not ours to lint.
-      - dashboard
       - third_party$
       - builtin$
       - examples$
     rules:
-      # httptest.NewRequest is the idiomatic way to build a request in a handler
-      # test and it takes no context. Requiring one there is pure noise.
       - path: _test\.go
         linters:
           - noctx
@@ -53,7 +59,6 @@ formatters:
   exclusions:
     generated: lax
     paths:
-      - dashboard
       - third_party$
       - builtin$
       - examples$

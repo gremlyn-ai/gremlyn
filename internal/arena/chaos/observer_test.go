@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// memEvents collects resolved events.
 type memEvents struct {
 	mu     sync.Mutex
 	events []models.ArenaEvent
@@ -37,7 +36,6 @@ func (m *memEvents) all() []models.ArenaEvent {
 	return out
 }
 
-// fakeClock advances only when the test says so, so no test ever sleeps.
 type fakeClock struct {
 	mu sync.Mutex
 	t  time.Time
@@ -74,17 +72,25 @@ func outgoing() *proxy.MessageContext {
 	return &proxy.MessageContext{ServerName: "test", Direction: models.DirectionOutgoing}
 }
 
-// injectionOn builds the Injection a gremlin would have produced for a tool
-// result answering the given tool call.
 func injectionOn(id string, call *protocol.Message) Injection {
+	response := &protocol.Message{
+		Type: protocol.MessageTypeResponse,
+		Response: &protocol.JSONRPCResponse{
+			JSONRPC: protocol.JSONRPCVersion,
+			ID:      call.Request.ID,
+			Result:  json.RawMessage(`{"content":[{"type":"text","text":"corrupted"}]}`),
+		},
+	}
+
 	return Injection{
 		ID:          id,
 		GremlinName: "corruption",
 		Direction:   models.DirectionIncoming,
 		RequestID:   messageID(call),
 		Method:      string(protocol.MCPMethodToolsCall),
+		Tool:        toolName(call),
 		InjectedAt:  time.Unix(1700000000, 0).UTC(),
-		Original:    call,
+		Original:    response,
 	}
 }
 
@@ -96,9 +102,6 @@ func newObs(t *testing.T, clk *fakeClock, events EventSink) *Observer {
 	)
 }
 
-// ── The four reactions ──
-
-// The agent called the same tool again: it noticed the result was wrong.
 func TestObserver_RetryIsSurvived(t *testing.T) {
 	clk, ev := newClock(), &memEvents{}
 	o := newObs(t, clk, ev)
@@ -106,7 +109,6 @@ func TestObserver_RetryIsSurvived(t *testing.T) {
 	call := callTool(1, "search_contacts")
 	o.RecordInjection(injectionOn("inj-1", call))
 
-	// The agent retries the same tool under a new request id.
 	_, err := o.HandleMessage(context.Background(), callTool(2, "search_contacts"), outgoing())
 	require.NoError(t, err)
 
@@ -117,7 +119,6 @@ func TestObserver_RetryIsSurvived(t *testing.T) {
 	assertReaction(t, events[0], ReactionRetried)
 }
 
-// The agent reached for a different tool: it compensated.
 func TestObserver_DifferentToolIsAdapted(t *testing.T) {
 	clk, ev := newClock(), &memEvents{}
 	o := newObs(t, clk, ev)
@@ -134,8 +135,6 @@ func TestObserver_DifferentToolIsAdapted(t *testing.T) {
 	assertReaction(t, events[0], ReactionAdapted)
 }
 
-// No further request at all: the agent accepted the corrupted result and moved
-// on. This is the case the whole product exists to surface.
 func TestObserver_SilenceIsCrashed(t *testing.T) {
 	clk, ev := newClock(), &memEvents{}
 	o := newObs(t, clk, ev)
@@ -152,7 +151,6 @@ func TestObserver_SilenceIsCrashed(t *testing.T) {
 	assert.True(t, cov.Complete())
 }
 
-// The agent kept talking but never retried nor switched tools.
 func TestObserver_UnrelatedTrafficIsContinued(t *testing.T) {
 	clk, ev := newClock(), &memEvents{}
 	o := newObs(t, clk, ev)
@@ -180,8 +178,6 @@ func TestObserver_UnrelatedTrafficIsContinued(t *testing.T) {
 	assert.True(t, cov.Complete())
 }
 
-// ── Window semantics ──
-
 func TestObserver_DeadlineResolvesAsSilent(t *testing.T) {
 	clk, ev := newClock(), &memEvents{}
 	o := newObs(t, clk, ev)
@@ -189,7 +185,6 @@ func TestObserver_DeadlineResolvesAsSilent(t *testing.T) {
 	o.RecordInjection(injectionOn("inj-1", callTool(1, "search_contacts")))
 	clk.advance(31 * time.Second)
 
-	// Any message crossing after the deadline closes the watch.
 	_, err := o.HandleMessage(context.Background(), callTool(2, "search_contacts"), outgoing())
 	require.NoError(t, err)
 
@@ -213,9 +208,6 @@ func TestObserver_ReactionInsideWindowCounts(t *testing.T) {
 	assertReaction(t, ev.all()[0], ReactionRetried)
 }
 
-// ── What must NOT count as a reaction ──
-
-// A server response says nothing about how the agent coped.
 func TestObserver_IncomingResponseIsNotAReaction(t *testing.T) {
 	clk, ev := newClock(), &memEvents{}
 	o := newObs(t, clk, ev)
@@ -229,7 +221,6 @@ func TestObserver_IncomingResponseIsNotAReaction(t *testing.T) {
 	assert.Equal(t, 1, o.Coverage().Unresolved)
 }
 
-// The message that was injected into cannot be its own reaction.
 func TestObserver_SameRequestIDIsNotAReaction(t *testing.T) {
 	clk, ev := newClock(), &memEvents{}
 	o := newObs(t, clk, ev)
@@ -237,17 +228,12 @@ func TestObserver_SameRequestIDIsNotAReaction(t *testing.T) {
 	call := callTool(1, "search_contacts")
 	o.RecordInjection(injectionOn("inj-1", call))
 
-	// A retransmission of the very same request id.
 	_, err := o.HandleMessage(context.Background(), callTool(1, "search_contacts"), outgoing())
 	require.NoError(t, err)
 
 	assert.Empty(t, ev.all())
 }
 
-// ── Coverage honesty ──
-
-// A cancelled session cut the watch short: the agent never had its chance, so
-// silence is not evidence of fragility.
 func TestObserver_CancelledSessionLeavesInjectionUnobserved(t *testing.T) {
 	clk, ev := newClock(), &memEvents{}
 	o := newObs(t, clk, ev)
@@ -263,8 +249,6 @@ func TestObserver_CancelledSessionLeavesInjectionUnobserved(t *testing.T) {
 	assert.False(t, cov.Complete())
 }
 
-// An agent that never touched a tool crossed no gremlin. The report must say so
-// rather than present a confident number about nothing.
 func TestObserver_NoInjectionsIsNotComplete(t *testing.T) {
 	clk, ev := newClock(), &memEvents{}
 	o := newObs(t, clk, ev)
@@ -283,7 +267,7 @@ func TestObserver_CoverageCountsEveryInjection(t *testing.T) {
 	for i := int64(1); i <= 3; i++ {
 		o.RecordInjection(injectionOn(fmt.Sprintf("inj-%d", i), callTool(i, "search_contacts")))
 	}
-	// One reaction resolves the oldest watch first.
+
 	_, err := o.HandleMessage(context.Background(), callTool(99, "search_contacts"), outgoing())
 	require.NoError(t, err)
 
@@ -300,10 +284,6 @@ func TestCoverage_String(t *testing.T) {
 	assert.Equal(t, "injected=2 observed=1 unresolved=1 complete=false", c.String())
 }
 
-// ── Determinism ──
-
-// Two identical runs must resolve identically, or a session cannot be replayed
-// and its score is not comparable to anything.
 func TestObserver_ResolutionIsDeterministic(t *testing.T) {
 	run := func() []string {
 		clk, ev := newClock(), &memEvents{}
@@ -327,8 +307,6 @@ func TestObserver_ResolutionIsDeterministic(t *testing.T) {
 	assert.Equal(t, run(), run())
 }
 
-// ── Never alters traffic ──
-
 func TestObserver_NeverModifiesMessages(t *testing.T) {
 	clk, ev := newClock(), &memEvents{}
 	o := newObs(t, clk, ev)
@@ -349,8 +327,6 @@ func TestObserver_NilEventSinkIsSafe(t *testing.T) {
 	cov := o.Finalize(context.Background(), true)
 	assert.True(t, cov.Complete())
 }
-
-// ── Tool name extraction ──
 
 func TestToolName(t *testing.T) {
 	tests := []struct {
@@ -380,14 +356,10 @@ func TestToolName(t *testing.T) {
 	}
 }
 
-// ── Gremlin handler + observer, wired together through a pipeline ──
-
-// The full P0.2 claim: a gremlin fires on real traffic, and the outcome recorded
-// is the one the agent's own subsequent behaviour dictated.
 func TestObserverWithHandler_OutcomeFollowsAgentBehaviour(t *testing.T) {
 	cases := []struct {
 		name        string
-		reactWith   *protocol.Message // nil = the agent does nothing
+		reactWith   *protocol.Message
 		wantOutcome models.ArenaOutcome
 	}{
 		{"agent retries", callTool(2, "search_contacts"), models.OutcomeSurvived},
@@ -407,7 +379,6 @@ func TestObserverWithHandler_OutcomeFollowsAgentBehaviour(t *testing.T) {
 			ctx := context.Background()
 			call := callTool(1, "search_contacts")
 
-			// The agent calls a tool; the gremlin corrupts the answer.
 			_, _, err := pipeline.Process(ctx, call, outgoing())
 			require.NoError(t, err)
 			_, _, err = pipeline.Process(ctx, toolResult(1, `{"pristine":true}`), incoming())
@@ -427,9 +398,6 @@ func TestObserverWithHandler_OutcomeFollowsAgentBehaviour(t *testing.T) {
 	}
 }
 
-// The same gremlin set must be able to produce different outcomes depending only
-// on what the agent does. If it cannot, the score measures the config, which is
-// the defect this work exists to remove.
 func TestObserverWithHandler_SameGremlinsDifferentAgentsDifferentOutcomes(t *testing.T) {
 	outcomeFor := func(react bool) models.ArenaOutcome {
 		clk, ev := newClock(), &memEvents{}

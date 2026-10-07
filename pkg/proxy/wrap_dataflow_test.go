@@ -17,15 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests exercise the actual request/response path through the wrap proxy.
-//
-// They exist because every earlier wrap test only covered construction, which let
-// a teardown bug ship: the client reaching EOF tore the proxy down before the
-// child's responses were drained, so `gremlyn wrap` forwarded a request and never
-// returned its answer.
-
-// syncBuffer is an io.Writer safe for concurrent use, since the proxy writes to
-// the client stream from its own goroutine while the test reads it.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -43,8 +34,6 @@ func (s *syncBuffer) String() string {
 	return s.buf.String()
 }
 
-// echoServerCmd returns a Config for a fake stdio MCP server: a shell loop that
-// answers every line it receives with a JSON-RPC result carrying the same id.
 func echoServerCmd() Config {
 	const script = `while IFS= read -r line; do
 	  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
@@ -52,7 +41,6 @@ func echoServerCmd() Config {
 	done`
 	return Config{
 		ServerName: "fake-mcp",
-		Mode:       models.ServerModeWrap,
 		Command:    "sh",
 		Args:       []string{"-c", script},
 	}
@@ -69,14 +57,9 @@ func requestLine(t *testing.T, id int, method string) string {
 	return string(b) + "\n"
 }
 
-// TestWrapProxy_ForwardsResponseAfterClientEOF is the regression test for the
-// teardown bug. Piping input closes the client stream immediately, which is both
-// how a script drives the proxy and how a real client disconnecting behaves — the
-// in-flight response must still reach the client.
 func TestWrapProxy_ForwardsResponseAfterClientEOF(t *testing.T) {
 	in := strings.NewReader(requestLine(t, 1, "tools/list"))
 	out := &syncBuffer{}
-
 	p := NewWrapProxy(echoServerCmd(),
 		WithLogger(zerolog.Nop()),
 		WithClientIO(in, out),
@@ -93,8 +76,6 @@ func TestWrapProxy_ForwardsResponseAfterClientEOF(t *testing.T) {
 	assert.Contains(t, got, `"ok":true`)
 }
 
-// TestWrapProxy_ForwardsMultipleResponses checks that a burst of requests all get
-// answered, not just the first.
 func TestWrapProxy_ForwardsMultipleResponses(t *testing.T) {
 	in := strings.NewReader(
 		requestLine(t, 1, "initialize") +
@@ -102,7 +83,6 @@ func TestWrapProxy_ForwardsMultipleResponses(t *testing.T) {
 			requestLine(t, 3, "tools/call"),
 	)
 	out := &syncBuffer{}
-
 	p := NewWrapProxy(echoServerCmd(),
 		WithLogger(zerolog.Nop()),
 		WithClientIO(in, out),
@@ -118,12 +98,9 @@ func TestWrapProxy_ForwardsMultipleResponses(t *testing.T) {
 	}
 }
 
-// TestWrapProxy_PipelineSeesBothDirections proves the pipeline is wired on the
-// real data path, in both directions — the seam Shield and Arena plug into.
 func TestWrapProxy_PipelineSeesBothDirections(t *testing.T) {
 	var mu sync.Mutex
 	seen := map[models.Direction]int{}
-
 	pipeline := NewPipeline(zerolog.Nop())
 	pipeline.RegisterHandler(&countingHandler{
 		onMessage: func(mctx *MessageContext) {
@@ -135,7 +112,6 @@ func TestWrapProxy_PipelineSeesBothDirections(t *testing.T) {
 
 	in := strings.NewReader(requestLine(t, 7, "tools/list"))
 	out := &syncBuffer{}
-
 	p := NewWrapProxy(echoServerCmd(),
 		WithLogger(zerolog.Nop()),
 		WithPipeline(pipeline),
@@ -152,9 +128,6 @@ func TestWrapProxy_PipelineSeesBothDirections(t *testing.T) {
 	assert.Positive(t, seen[models.DirectionIncoming], "pipeline never saw the response")
 }
 
-// TestWrapProxy_BlockedRequestGetsJSONRPCError checks that a blocking handler
-// produces an error the agent can actually see. A silent drop would leave the
-// agent waiting forever, which is worse than a refusal.
 func TestWrapProxy_BlockedRequestGetsJSONRPCError(t *testing.T) {
 	pipeline := NewPipeline(zerolog.Nop())
 	pipeline.RegisterHandler(&countingHandler{
@@ -168,7 +141,6 @@ func TestWrapProxy_BlockedRequestGetsJSONRPCError(t *testing.T) {
 
 	in := strings.NewReader(requestLine(t, 9, "tools/call"))
 	out := &syncBuffer{}
-
 	p := NewWrapProxy(echoServerCmd(),
 		WithLogger(zerolog.Nop()),
 		WithPipeline(pipeline),
@@ -186,8 +158,6 @@ func TestWrapProxy_BlockedRequestGetsJSONRPCError(t *testing.T) {
 	assert.Contains(t, got, "test policy")
 }
 
-// TestWrapProxy_StopIsIdempotent guards the shutdown path against a double Stop,
-// which Start itself can trigger alongside an explicit caller Stop.
 func TestWrapProxy_StopIsIdempotent(t *testing.T) {
 	in := strings.NewReader(requestLine(t, 1, "tools/list"))
 	p := NewWrapProxy(echoServerCmd(),
@@ -202,8 +172,6 @@ func TestWrapProxy_StopIsIdempotent(t *testing.T) {
 	require.NoError(t, p.Stop())
 }
 
-// countingHandler is a test Handler that observes every message and optionally
-// decides on it.
 type countingHandler struct {
 	onMessage func(mctx *MessageContext)
 	decide    func(mctx *MessageContext) *Decision
@@ -212,7 +180,6 @@ type countingHandler struct {
 func (h *countingHandler) Name() string                { return "test-counter" }
 func (h *countingHandler) Priority() int               { return 100 }
 func (h *countingHandler) Direction() models.Direction { return models.DirectionBoth }
-
 func (h *countingHandler) HandleMessage(_ context.Context, _ *protocol.Message, mctx *MessageContext) (*Decision, error) {
 	if h.onMessage != nil {
 		h.onMessage(mctx)
