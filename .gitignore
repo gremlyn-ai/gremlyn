@@ -1,52 +1,24 @@
-# Binaries — the Makefile writes to bin/
 /bin/
 /gremlyn
-/shield
-/arena
 /dist/
 *.exe
-*.dll
-*.so
-*.dylib
-
-# Test & coverage
 *.test
 *.out
-coverage.txt
 coverage.html
 
-# Local databases
-*.db
-*.db-wal
-*.db-shm
-db.sqlite3
-
-# Env & secrets
 .env
-.env.local
-.env.*.local
+.env.*
 *.pem
 *.key
 
-# Node / Next.js (dashboard/)
-node_modules/
-.next/
-out/
-next-env.d.ts
-tsconfig.tsbuildinfo
-npm-debug.log*
-.pnpm-debug.log*
-
-# IDE
 .idea/
 .vscode/
 *.swp
-*.swo
-
-# OS
 .DS_Store
-Thumbs.db
 
-# Claude Code local memory & session state
+.claude/
+CLAUDE.md
 CLAUDE.local.md
-.claude/settings.local.json
+PLAN.md
+instruction.txt
+gremlyn-complete-specs.txt
