@@ -48,6 +48,14 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 say "Downloading gremlyn $version ($os/$arch)…"
 $DL "$tmp/$archive" "$base/$archive" || die "download failed: $base/$archive"
 
+verify_signature() {
+  cosign verify-blob "$tmp/checksums.txt" "$@" \
+    --certificate-identity-regexp "^https://github.com/${REPO}/" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    >/dev/null 2>&1 \
+    || die "SIGNATURE verification FAILED for checksums.txt — refusing to install"
+}
+
 if [ "${GREMLYN_SKIP_VERIFY:-0}" = "1" ]; then
   say "WARNING: GREMLYN_SKIP_VERIFY=1 — installing without verifying the download."
 else
@@ -55,15 +63,16 @@ else
     || die "could not download checksums.txt; refusing to install an unverified binary"
 
   if command -v cosign >/dev/null 2>&1; then
-    if $DL "$tmp/checksums.txt.sig" "$base/checksums.txt.sig" \
-       && $DL "$tmp/checksums.txt.pem" "$base/checksums.txt.pem"; then
-      cosign verify-blob "$tmp/checksums.txt" \
-        --signature "$tmp/checksums.txt.sig" \
-        --certificate "$tmp/checksums.txt.pem" \
-        --certificate-identity-regexp "^https://github.com/${REPO}/" \
-        --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-        >/dev/null 2>&1 \
-        || die "SIGNATURE verification FAILED for checksums.txt — refusing to install"
+    verified=""
+    if $DL "$tmp/checksums.txt.sigstore.json" "$base/checksums.txt.sigstore.json" 2>/dev/null; then
+      verify_signature --bundle "$tmp/checksums.txt.sigstore.json"
+      verified=1
+    elif $DL "$tmp/checksums.txt.sig" "$base/checksums.txt.sig" 2>/dev/null \
+       && $DL "$tmp/checksums.txt.pem" "$base/checksums.txt.pem" 2>/dev/null; then
+      verify_signature --signature "$tmp/checksums.txt.sig" --certificate "$tmp/checksums.txt.pem"
+      verified=1
+    fi
+    if [ -n "$verified" ]; then
       say "Signature verified (cosign)."
     else
       say "NOTE: no signature published for this release; verifying the checksum only."

@@ -107,12 +107,17 @@ runs:
 
         curl -fsSL -o "$dir/checksums.txt" "$base/checksums.txt"
 
-        if command -v cosign >/dev/null 2>&1 \
-           && curl -fsSL -o "$dir/checksums.txt.sig" "$base/checksums.txt.sig" \
-           && curl -fsSL -o "$dir/checksums.txt.pem" "$base/checksums.txt.pem"; then
-          cosign verify-blob "$dir/checksums.txt" \
-            --signature "$dir/checksums.txt.sig" \
-            --certificate "$dir/checksums.txt.pem" \
+        sig=()
+        if command -v cosign >/dev/null 2>&1; then
+          if curl -fsSL -o "$dir/checksums.txt.sigstore.json" "$base/checksums.txt.sigstore.json" 2>/dev/null; then
+            sig=(--bundle "$dir/checksums.txt.sigstore.json")
+          elif curl -fsSL -o "$dir/checksums.txt.sig" "$base/checksums.txt.sig" 2>/dev/null \
+             && curl -fsSL -o "$dir/checksums.txt.pem" "$base/checksums.txt.pem" 2>/dev/null; then
+            sig=(--signature "$dir/checksums.txt.sig" --certificate "$dir/checksums.txt.pem")
+          fi
+        fi
+        if [ ${#sig[@]} -gt 0 ]; then
+          cosign verify-blob "$dir/checksums.txt" "${sig[@]}" \
             --certificate-identity-regexp "^https://github.com/gremlyn-ai/gremlyn/" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
           echo "signature verified"
