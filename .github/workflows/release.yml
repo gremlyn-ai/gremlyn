@@ -49,7 +49,8 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           num="${tag#v}"
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}"
-          curl -fsSL -o g.tar.gz "${base}/gremlyn_${num}_linux_amd64.tar.gz"
+          archive="gremlyn_${num}_linux_amd64.tar.gz"
+          curl -fsSL -o "$archive" "${base}/${archive}"
           curl -fsSL -o checksums.txt "${base}/checksums.txt"
           curl -fsSL -o checksums.txt.sig "${base}/checksums.txt.sig"
           curl -fsSL -o checksums.txt.pem "${base}/checksums.txt.pem"
@@ -61,7 +62,7 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
           sha256sum -c checksums.txt --ignore-missing
-          tar -xzf g.tar.gz
+          tar -xzf "$archive"
           ./gremlyn version
           ./gremlyn arena list-gremlins
 
