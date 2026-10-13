@@ -72,11 +72,11 @@ environment, so a token can stay out of the command line: single-quote the flag.
 				if err != nil {
 					return err
 				}
-				headers, err = resolveHeaders(headers, os.LookupEnv)
+				headers, err = resolveHeaders(headers, os.LookupEnv, nil)
 				if err != nil {
 					return fmt.Errorf("--upstream-header: %w", err)
 				}
-				target, err := resolveURL(upstreamURL, os.LookupEnv)
+				target, err := resolveURL(upstreamURL, os.LookupEnv, nil)
 				if err != nil {
 					return fmt.Errorf("--upstream: %w", err)
 				}

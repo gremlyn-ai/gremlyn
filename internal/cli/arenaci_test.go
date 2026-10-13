@@ -63,6 +63,10 @@ func TestValidateCIConfig(t *testing.T) {
 			httpServer(c)
 			c.MCPServer.URL = "https://${GREMLYN_TEST_EMPTY}/mcp"
 		}, "GREMLYN_TEST_EMPTY is not set"},
+		{"agent.env passing the token to the agent", func(c *CIConfig) {
+			httpServer(c)
+			c.Agent.Env = map[string]string{"GREMLYN_TEST_TOKEN": "x"}
+		}, "agent.env sets GREMLYN_TEST_TOKEN"},
 		{"plain http on loopback", func(c *CIConfig) {
 			httpServer(c)
 			c.MCPServer.URL = "http://127.0.0.1:8080/mcp"

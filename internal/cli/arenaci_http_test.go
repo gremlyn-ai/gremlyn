@@ -238,7 +238,17 @@ func TestArenaCI_HTTP_SecretsNeverReachAFile(t *testing.T) {
 	var logs bytes.Buffer
 	logger := zerolog.New(&logs).Level(zerolog.DebugLevel)
 	cfg := httpCIConfig(agentBin, "robust", srv.Server.URL+"/${GREMLYN_E2E_PATH}/mcp")
+	envDump := filepath.Join(t.TempDir(), "agent-env")
+	cfg.Agent.Command = append(cfg.Agent.Command, "--dump-env", envDump)
 	res := runScenario(context.Background(), logger, "", cfg, httpScenario("secrets", "injection", "timeout"), true)
+
+	agentEnv, err := os.ReadFile(envDump)
+	require.NoError(t, err)
+	dumped := string(agentEnv)
+	require.True(t, strings.Contains(dumped, "PATH="), "the agent's environment was dumped")
+	assert.False(t, strings.Contains(dumped, token), "the header value must not reach the agent process")
+	assert.False(t, strings.Contains(dumped, pathSecret), "nor the URL's variable")
+	assert.False(t, strings.Contains(dumped, e2eTokenEnv+"="), "the variable itself is removed")
 	require.Positive(t, res.Coverage.Injected, "failures: %v", res.Failures)
 
 	assert.Contains(t, srv.authHeaders(), "Bearer "+token, "the configured header reaches the server")

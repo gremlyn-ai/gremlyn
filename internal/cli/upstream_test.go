@@ -38,7 +38,7 @@ func TestResolveHeaders(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveHeaders(tt.in, env)
+			got, err := resolveHeaders(tt.in, env, nil)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
@@ -60,4 +60,28 @@ func TestParseHeaderFlags(t *testing.T) {
 		_, err := parseHeaderFlags(bad)
 		assert.Error(t, err, "%v", bad)
 	}
+}
+
+func TestResolveUpstream_ReportsTheVariablesItRead(t *testing.T) {
+	env := fakeEnv(map[string]string{"TOKEN": "s", "TENANT": "acme", "PATHKEY": "k"})
+	got, err := resolveUpstream(&MCPServerConfig{
+		URL:     "https://mcp.example.com/${PATHKEY}/mcp",
+		Headers: map[string]string{"Authorization": "Bearer ${TOKEN}", "X-Tenant": "${TENANT}", "X-Static": "v"},
+	}, env)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"PATHKEY", "TENANT", "TOKEN"}, got.Vars)
+	assert.Equal(t, "https://mcp.example.com/k/mcp", got.URL)
+}
+
+func TestScrubEnv(t *testing.T) {
+	environ := []string{"PATH=/bin", "TOKEN=s", "TOKEN_OTHER=x", "HOME=/h", "TOKEN=dup"}
+	assert.Equal(t, []string{"PATH=/bin", "TOKEN_OTHER=x", "HOME=/h"}, scrubEnv(environ, []string{"TOKEN"}))
+	assert.Equal(t, environ, scrubEnv(environ, nil))
+}
+
+func TestCheckAgentEnv(t *testing.T) {
+	require.NoError(t, checkAgentEnv(map[string]string{"OTHER": "1"}, []string{"TOKEN"}))
+	err := checkAgentEnv(map[string]string{"TOKEN": "x"}, []string{"TOKEN"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "agent.env sets TOKEN")
 }

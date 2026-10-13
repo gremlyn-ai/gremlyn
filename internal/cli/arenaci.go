@@ -210,6 +210,15 @@ func validateCIConfig(cfg *CIConfig) error {
 	if err := validateMCPServer(&cfg.MCPServer, os.LookupEnv); err != nil {
 		return err
 	}
+	if cfg.MCPServer.URL != "" {
+		resolved, err := resolveUpstream(&cfg.MCPServer, os.LookupEnv)
+		if err != nil {
+			return err
+		}
+		if err := checkAgentEnv(cfg.Agent.Env, resolved.Vars); err != nil {
+			return err
+		}
+	}
 	if len(cfg.Scenarios) == 0 {
 		return errors.New("at least one scenario is required")
 	}
@@ -275,9 +284,12 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 		seed = gremlins.DefaultSeed
 	}
 
-	var upstream *httpChaos
+	var (
+		upstream   *httpChaos
+		hiddenVars []string
+	)
 	if cfg.MCPServer.URL != "" {
-		upstream, err = startScenarioProxy(ctx, logger, cfg.MCPServer, sc, seed, eventsPath, summaryPath)
+		upstream, hiddenVars, err = startScenarioProxy(ctx, logger, cfg.MCPServer, sc, seed, eventsPath, summaryPath)
 		if err != nil {
 			res.Failures = append(res.Failures, err.Error())
 			return res
@@ -305,7 +317,7 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	})
 
 	agentCmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
-	agentCmd.Env = append(os.Environ(), envSlice(cfg.Agent.Env)...)
+	agentCmd.Env = append(scrubEnv(os.Environ(), hiddenVars), envSlice(cfg.Agent.Env)...)
 	agentCmd.Stdin = nil
 	var agentOut strings.Builder
 	agentCmd.Stdout = &agentOut
@@ -374,19 +386,15 @@ func startScenarioProxy(
 	sc ScenarioConfig,
 	seed int64,
 	eventsPath, summaryPath string,
-) (*httpChaos, error) {
-	headers, err := resolveHeaders(srv.Headers, os.LookupEnv)
+) (*httpChaos, []string, error) {
+	resolved, err := resolveUpstream(&srv, os.LookupEnv)
 	if err != nil {
-		return nil, fmt.Errorf("mcp_server.headers: %w", err)
+		return nil, nil, err
 	}
-	upstreamURL, err := resolveURL(srv.URL, os.LookupEnv)
-	if err != nil {
-		return nil, fmt.Errorf("mcp_server.%w", err)
-	}
-	return startHTTPChaos(ctx, upstreamTarget{
+	h, err := startHTTPChaos(ctx, upstreamTarget{
 		Name:           serverName(srv),
-		URL:            upstreamURL,
-		Headers:        headers,
+		URL:            resolved.URL,
+		Headers:        resolved.Headers,
 		RequestTimeout: srv.RequestTimeout,
 	}, chaosSetup{
 		Gremlins:    sc.Gremlins,
@@ -397,6 +405,10 @@ func startScenarioProxy(
 		EventsPath:  eventsPath,
 		SummaryPath: summaryPath,
 	}, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	return h, resolved.Vars, nil
 }
 
 func serverName(srv MCPServerConfig) string {

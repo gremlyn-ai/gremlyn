@@ -11,7 +11,49 @@ import (
 
 type envLookup func(string) (string, bool)
 
-func resolveHeaders(raw map[string]string, lookup envLookup) (map[string]string, error) {
+type resolvedUpstream struct {
+	URL     string
+	Headers map[string]string
+	Vars    []string
+}
+
+func resolveUpstream(srv *MCPServerConfig, lookup envLookup) (resolvedUpstream, error) {
+	used := map[string]bool{}
+	u, err := resolveURL(srv.URL, lookup, used)
+	if err != nil {
+		return resolvedUpstream{}, fmt.Errorf("mcp_server.%w", err)
+	}
+	headers, err := resolveHeaders(srv.Headers, lookup, used)
+	if err != nil {
+		return resolvedUpstream{}, fmt.Errorf("mcp_server.headers: %w", err)
+	}
+	vars := make([]string, 0, len(used))
+	for name := range used {
+		vars = append(vars, name)
+	}
+	sort.Strings(vars)
+	return resolvedUpstream{URL: u, Headers: headers, Vars: vars}, nil
+}
+
+func scrubEnv(environ, vars []string) []string {
+	if len(vars) == 0 {
+		return environ
+	}
+	drop := make(map[string]bool, len(vars))
+	for _, v := range vars {
+		drop[v] = true
+	}
+	out := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		if !drop[name] {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+func resolveHeaders(raw map[string]string, lookup envLookup, used map[string]bool) (map[string]string, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
@@ -29,7 +71,7 @@ func resolveHeaders(raw map[string]string, lookup envLookup) (map[string]string,
 		if proxy.ReservedUpstreamHeader(name) {
 			return nil, fmt.Errorf("header %q is managed by the proxy and cannot be set", name)
 		}
-		value, err := expandHeaderValue(name, raw[name], lookup)
+		value, err := expandHeaderValue(name, raw[name], lookup, used)
 		if err != nil {
 			return nil, err
 		}
@@ -38,9 +80,9 @@ func resolveHeaders(raw map[string]string, lookup envLookup) (map[string]string,
 	return out, nil
 }
 
-func expandHeaderValue(name, value string, lookup envLookup) (string, error) {
+func expandHeaderValue(name, value string, lookup envLookup, used map[string]bool) (string, error) {
 	what := fmt.Sprintf("header %q", name)
-	out, err := expandEnvRefs(what, value, lookup)
+	out, err := expandEnvRefs(what, value, lookup, used)
 	if err != nil {
 		return "", err
 	}
@@ -50,11 +92,11 @@ func expandHeaderValue(name, value string, lookup envLookup) (string, error) {
 	return out, nil
 }
 
-func resolveURL(raw string, lookup envLookup) (string, error) {
-	return expandEnvRefs("url", raw, lookup)
+func resolveURL(raw string, lookup envLookup, used map[string]bool) (string, error) {
+	return expandEnvRefs("url", raw, lookup, used)
 }
 
-func expandEnvRefs(what, value string, lookup envLookup) (string, error) {
+func expandEnvRefs(what, value string, lookup envLookup, used map[string]bool) (string, error) {
 	var b strings.Builder
 	rest := value
 	for {
@@ -77,6 +119,9 @@ func expandEnvRefs(what, value string, lookup envLookup) (string, error) {
 			return "", fmt.Errorf("%s: environment variable %s is not set", what, ref)
 		}
 		b.WriteString(v)
+		if used != nil {
+			used[ref] = true
+		}
 		rest = rest[start+2+end+1:]
 	}
 
@@ -153,18 +198,25 @@ func validateMCPServer(srv *MCPServerConfig, lookup envLookup) error {
 		return nil
 	}
 
-	resolved, err := resolveURL(srv.URL, lookup)
+	resolved, err := resolveUpstream(srv, lookup)
 	if err != nil {
-		return fmt.Errorf("mcp_server.%w", err)
+		return err
 	}
-	if _, err := proxy.ValidateUpstreamURL(resolved); err != nil {
+	if _, err := proxy.ValidateUpstreamURL(resolved.URL); err != nil {
 		return fmt.Errorf("mcp_server.%w", err)
 	}
 	if srv.RequestTimeout < 0 {
 		return fmt.Errorf("mcp_server.request_timeout must be positive, got %s", srv.RequestTimeout)
 	}
-	if _, err := resolveHeaders(srv.Headers, lookup); err != nil {
-		return fmt.Errorf("mcp_server.headers: %w", err)
+	return nil
+}
+
+func checkAgentEnv(agentEnv map[string]string, vars []string) error {
+	for _, v := range vars {
+		if _, ok := agentEnv[v]; ok {
+			return fmt.Errorf("agent.env sets %s, which mcp_server reads for its url or headers: "+
+				"the agent never sees those variables", v)
+		}
 	}
 	return nil
 }

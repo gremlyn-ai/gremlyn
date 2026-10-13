@@ -48,7 +48,15 @@ func main() {
 	expect := flag.String("expect-key", "ok",
 		"a top-level key the result must contain; a robust agent retries when it is missing")
 	flag.String("prompt", "", "ignored; accepted so the CI config can pass one")
+	dumpEnv := flag.String("dump-env", "", "write the agent's environment to this file")
 	flag.Parse()
+
+	if *dumpEnv != "" {
+		if err := os.WriteFile(*dumpEnv, []byte(strings.Join(os.Environ(), "\n")), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "refagent: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	if err := run(*mode, *cfgPath, *tool, *expect, *retries); err != nil {
 		fmt.Fprintf(os.Stderr, "refagent: %v\n", err)
