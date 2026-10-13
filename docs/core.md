@@ -44,17 +44,29 @@ client. Every message goes through `Pipeline.Process` before it is forwarded.
 (and 2025-03-26, which it extends). `arena ci` runs it in-process when `mcp_server` has a
 `url`; `gremlyn wrap --upstream <url>` runs it by hand.
 
-- **It listens on loopback only**, `127.0.0.1` on a free port by default, at `/mcp`. A
-  `Host` or `Origin` that is not loopback is refused, which is the DNS rebinding guard the
-  spec asks of a local server.
+- **It listens on loopback only**, `127.0.0.1` on a free port by default. The bound address
+  is checked after `listen`, so a `localhost` that resolves elsewhere is refused. A `Host` or
+  `Origin` that is not loopback is refused, which is the DNS rebinding guard the spec asks of
+  a local server.
+- **A per-run secret path gates access.** The endpoint is `/mcp/<32 hex characters>` drawn
+  from `crypto/rand` and compared in constant time; any other path is a 404 and nothing is
+  forwarded. The proxy adds the upstream's credentials to what reaches it, so this is what
+  keeps another local process, or a web page, from borrowing them. The path is not a
+  credential to the upstream: it only opens the proxy. `arena ci` writes the full URL into the
+  agent's `mcp.json` (mode 0600), `wrap --upstream` prints it on stderr, and the logs record
+  the listen address only. Browser requests whose `Sec-Fetch-Site` is `cross-site` or
+  `same-site`, or whose `Sec-Fetch-Mode` is `navigate` or `no-cors`, are refused too.
 - **`POST`, `GET` and `DELETE`** are forwarded; anything else is a 405.
 - **Every JSON-RPC message goes through `Pipeline.Process`**: the request body, a JSON
   response, and each `data:` event of an SSE stream, on the POST's stream as well as on the
   `GET` stream. The observer and the gremlins do not know which transport they run on.
 - **SSE is re-emitted event by event**, flushed as it goes, never buffered whole. `id:`,
   `event:` and `retry:` survive, so `Last-Event-ID` resumption keeps working.
-- **An untouched message is forwarded from its raw bytes.** A no-op is byte-exact over HTTP,
-  where stdio re-serializes.
+- **An untouched message is forwarded from its raw bytes.** A no-op is byte-exact per
+  JSON-RPC message over HTTP, where stdio re-serializes. On an SSE stream the payload of each
+  event is byte-exact; the framing around it is normalized: `data:x` is re-emitted as
+  `data: x`, and CR or CRLF line endings as LF. A line may end in CR, LF or CRLF, as the SSE
+  format allows.
 - **Correlation is the pipeline's.** The request is tracked before it is forwarded, and its
   response is matched by session and id on whichever stream carries it: the JSON body, the
   POST's SSE stream or the `GET` stream. `MessageContext.Session` is the `Mcp-Session-Id` of
@@ -65,14 +77,28 @@ client. Every message goes through `Pipeline.Process` before it is forwarded.
   is not returned to the agent: its challenge names the upstream's OAuth metadata, which the
   agent cannot use through the proxy.
 - **Sizes are capped** at the payload limit (`WithMaxPayload`, 16 MiB by default): the agent's
-  request body, a JSON response, each SSE event and each SSE line.
-- **Upstream timeouts are explicit.** `request_timeout` (default 60s) bounds the wait for
-  response headers and the silence between two events of a POST's SSE stream; a `GET`
-  stream may stay silent. A real timeout answers the agent `504` with a JSON-RPC error that
-  carries the request id and code -32603. It never goes through the gremlins, so it never
-  becomes an event, and it is counted in the session summary and the scenario result, where
-  it fails the scenario.
-- **Redirects are not followed**, so a credential never leaves for another URL.
+  request body, a JSON response, each SSE event and each SSE line. An SSE event also holds at
+  most 4096 fields, and every line costs its length plus a fixed charge, so a flood of empty
+  fields is refused before it is held in memory.
+- **Upstream timeouts are explicit.** `request_timeout` (default 60s, must be positive) bounds
+  the wait for response headers and the silence between two events of a POST's SSE stream,
+  until its response has crossed; a `GET` stream may stay silent. While the server waits for
+  the agent's answer to a request it sent on that stream (`elicitation/create`,
+  `sampling/createMessage`), the limit is paused until the answer crosses. A real timeout
+  answers the agent `504` with a JSON-RPC error that carries the request id and code -32603.
+  It never goes through the gremlins, so it never becomes an event.
+- **Upstream failures are counted, never swallowed**: a 5xx, a 404 on a request that names a
+  session, an unreachable server, an oversize message, a broken SSE stream (even a `GET`
+  stream, or a POST's stream after its response). A JSON body of an error status still goes
+  through the pipeline. Timeouts and failures are written to the session summary, the
+  scenario result and the session record; they fail the scenario and mark the run `failed`,
+  and `wrap --upstream` exits non-zero, because the agent then reacted to a failure no
+  gremlin owns.
+- **Nothing the upstream chose is logged.** A message that is not JSON-RPC is forwarded
+  untouched and logged with a fixed reason and its length.
+- **Redirects are not followed**, so a credential never leaves for another URL. A plain
+  `http` upstream is dialed only to a loopback IP, whatever its name resolves to, and never
+  through an environment proxy.
 - **TLS verification is always on.** There is no option to turn it off.
 - **Shutdown drains in-flight exchanges** for up to 10 seconds, after closing the `GET`
   streams, so a response already on its way still reaches the agent.
@@ -89,15 +115,26 @@ Refused with a diagnostic, rather than half supported:
 
 ### Credentials
 
-`mcp_server.headers` takes static headers. A value expands `${VAR}` from the environment and
-nothing else; an unset or empty variable is a validation error. The `url` must be `https`, or
-`http` on a loopback address, so a bearer token never crosses a network in clear, and it may
-not carry userinfo.
+`mcp_server.headers` takes static headers. Header values and the `url` expand `${VAR}` from
+the environment and nothing else; an unset or empty variable is a validation error. `GH_TOKEN`
+and every `GITHUB_*` and `ACTIONS_*` variable are refused, so a scenario file changed in a pull
+request cannot send a CI token to a host it names. Header names are case-insensitive and may
+appear once. The `url` must be `https`, or `http` on a loopback address, so a bearer token
+never crosses a network in clear, and it may not carry userinfo.
 
-Header values are secrets. They live in the gremlyn process only: the MCP config handed to
-the agent points at the local proxy and holds no header, and nothing in the logs, `mcp.json`,
-`session.json`, `events.jsonl`, `summary.json`, the report or the PR comment contains them.
-The recorded server is the URL without its query.
+Header values, and a URL path that may carry a key, are secrets. They live in the gremlyn
+process only:
+
+- the MCP config handed to the agent points at the local proxy and holds no header;
+- the variables the `url` and the headers read are removed from the agent's environment, and
+  `agent.env` may not set them, so the agent process never sees the token;
+- the recorded server is the URL's scheme and host only, `https://host/…`, in `session.json`,
+  `summary.json`, the logs, `wrap`'s stderr and `arena replay`;
+- nothing in the logs, `mcp.json`, `session.json`, `events.jsonl`, `summary.json`, the report
+  or the PR comment contains a header value.
+
+The GitHub Action runs `arena ci` without its GitHub token in the environment and hands the
+token only to the commands that fetch the baseline.
 
 **Getting a token for your own server.** Use whatever your server accepts as a static
 credential: an API key, a personal access token, or a long-lived token minted for a test
