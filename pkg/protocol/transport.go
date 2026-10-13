@@ -19,6 +19,8 @@ type Transport interface {
 
 const MaxLineBytes = 16 << 20
 
+var ErrFrameTooLarge = errors.New("message exceeds the frame limit")
+
 type LineFramer struct {
 	Limit int64
 }
@@ -70,7 +72,7 @@ func readLimitedLine(reader *bufio.Reader, limit int) ([]byte, error) {
 		chunk, err := reader.ReadSlice('\n')
 		out = append(out, chunk...)
 		if len(out) > limit {
-			return nil, fmt.Errorf("message exceeds the %d byte frame limit", limit)
+			return nil, fmt.Errorf("%w of %d bytes", ErrFrameTooLarge, limit)
 		}
 		if err == nil {
 			return out, nil
@@ -167,7 +169,25 @@ func (t *StdioTransport) Close() error {
 	return nil
 }
 
+var ErrBatch = errors.New("JSON-RPC batches are not supported: MCP removed them in revision 2025-06-18")
+
+func ParseMessage(data []byte) (*Message, error) {
+	return parseRawMessage(data)
+}
+
+func EncodeMessage(msg *Message) ([]byte, error) {
+	return serializeMessage(msg)
+}
+
+func IsBatch(data []byte) bool {
+	trimmed := bytes.TrimLeft(data, " \t\r\n")
+	return len(trimmed) > 0 && trimmed[0] == '['
+}
+
 func parseRawMessage(data []byte) (*Message, error) {
+	if IsBatch(data) {
+		return nil, ErrBatch
+	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("invalid JSON: %w", err)
