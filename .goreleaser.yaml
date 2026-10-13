@@ -96,5 +96,9 @@ release:
     Or download a binary below and verify it:
 
     ```bash
+    cosign verify-blob checksums.txt \
+      --bundle checksums.txt.sigstore.json \
+      --certificate-identity-regexp '^https://github.com/gremlyn-ai/gremlyn/' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
     sha256sum -c checksums.txt --ignore-missing
     ```
