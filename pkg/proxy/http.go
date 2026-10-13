@@ -698,7 +698,7 @@ func (h *HTTPProxy) relayJSON(w http.ResponseWriter, r *http.Request, resp *http
 
 	out := body
 	if len(bytes.TrimSpace(body)) > 0 {
-		out = h.processIncoming(r.Context(), body, session)
+		out, _ = h.processIncoming(r.Context(), body, session)
 	}
 	if out == nil {
 		w.WriteHeader(http.StatusAccepted)
@@ -713,11 +713,11 @@ func (h *HTTPProxy) relayJSON(w http.ResponseWriter, r *http.Request, resp *http
 	}
 }
 
-func (h *HTTPProxy) processIncoming(ctx context.Context, data []byte, session string) []byte {
+func (h *HTTPProxy) processIncoming(ctx context.Context, data []byte, session string) (out []byte, parsed *protocol.Message) {
 	msg, err := protocol.ParseMessage(data)
 	if err != nil {
 		h.logger.Warn().Int("bytes", len(data)).Msg("the upstream sent something that is not a JSON-RPC message, forwarding it untouched")
-		return data
+		return data, nil
 	}
 	mctx := &MessageContext{
 		ServerName: h.cfg.ServerName,
@@ -728,22 +728,22 @@ func (h *HTTPProxy) processIncoming(ctx context.Context, data []byte, session st
 	decision, processed, err := h.pipeline.Process(ctx, msg, mctx)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("pipeline error on incoming message")
-		return data
+		return data, msg
 	}
 	if decision.Action == DecisionBlock {
 		id, ok := msg.GetID()
 		if !ok {
 			h.logger.Info().Str("method", msg.GetMethod()).Msg("incoming message blocked")
-			return nil
+			return nil, msg
 		}
 		processed = NewBlockErrorResponse(id, decision.Reason)
 	}
-	out, err := wireBytes(msg, processed)
+	out, err = wireBytes(msg, processed)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("encoding the incoming message, forwarding the original")
-		return data
+		return data, msg
 	}
-	return out
+	return out, msg
 }
 
 func (h *HTTPProxy) relaySSE(w http.ResponseWriter, r *http.Request, resp *http.Response, reqMsg *protocol.Message, session string, dog *watchdog) {
@@ -783,8 +783,8 @@ func (h *HTTPProxy) relaySSE(w http.ResponseWriter, r *http.Request, resp *http.
 		}
 		first = false
 
-		out, answered := h.processEvent(r.Context(), ev, session, wantID)
-		if answered {
+		out, msg := h.processEvent(r.Context(), ev, session)
+		if answers(msg, wantID) {
 			waiting = false
 		}
 		if out == nil {
@@ -801,28 +801,27 @@ func (h *HTTPProxy) relaySSE(w http.ResponseWriter, r *http.Request, resp *http.
 	}
 }
 
-func (h *HTTPProxy) processEvent(ctx context.Context, ev *protocol.SSEEvent, session, wantID string) (*protocol.SSEEvent, bool) {
+func (h *HTTPProxy) processEvent(ctx context.Context, ev *protocol.SSEEvent, session string) (*protocol.SSEEvent, *protocol.Message) {
 	data, ok := ev.Data()
 	if !ok || ev.Type() != "message" || len(bytes.TrimSpace(data)) == 0 {
-		return ev, false
+		return ev, nil
 	}
-	answered := false
-	if wantID != "" {
-		if msg, err := protocol.ParseMessage(data); err == nil && msg.Type == protocol.MessageTypeResponse {
-			if id, ok := msg.GetID(); ok && id.String() == wantID {
-				answered = true
-			}
-		}
-	}
-	out := h.processIncoming(ctx, data, session)
+	out, msg := h.processIncoming(ctx, data, session)
 	if out == nil {
-		return nil, answered
+		return nil, msg
 	}
 	if bytes.Equal(out, data) {
-		return ev, answered
+		return ev, msg
 	}
 	replaced := ev.WithData(out)
-	return &replaced, answered
+	return &replaced, msg
+}
+
+func answers(msg *protocol.Message, wantID string) bool {
+	if wantID == "" || msg == nil || msg.Type != protocol.MessageTypeResponse || msg.Response == nil {
+		return false
+	}
+	return msg.Response.ID.String() == wantID
 }
 
 func (h *HTTPProxy) endSSE(w http.ResponseWriter, rc *http.ResponseController, r *http.Request, reqMsg *protocol.Message, waiting bool, err error, timedOut bool) {

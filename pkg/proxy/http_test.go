@@ -1089,3 +1089,33 @@ func TestHTTPProxy_PlainHTTPToLocalhostByName(t *testing.T) {
 	p := startHTTPProxy(t, "http://localhost:"+u.Port(), nil, zerolog.Nop(), nil)
 	assert.Contains(t, call(t, http.MethodPost, p.URL(), toolCall, nil).body, `"ok"`)
 }
+
+func BenchmarkHTTPProxy_SSERelay(b *testing.B) {
+	var events strings.Builder
+	for i := range 20 {
+		fmt.Fprintf(&events, "id: %d\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progress\":%d}}\n\n", i, i)
+	}
+	events.WriteString("data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n\n")
+	stream := events.String()
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, stream)
+	}))
+	defer up.Close()
+	pipeline := NewPipeline(zerolog.Nop())
+	defer pipeline.Close()
+	p, err := NewHTTPProxy(HTTPConfig{URL: up.URL}, WithPipeline(pipeline))
+	require.NoError(b, err)
+	require.NoError(b, p.Start(context.Background()))
+	defer func() { _ = p.Shutdown(context.Background()) }()
+
+	b.ReportAllocs()
+	for b.Loop() {
+		resp, err := http.Post(p.URL(), "application/json", strings.NewReader(toolCall))
+		if err != nil {
+			b.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+}
