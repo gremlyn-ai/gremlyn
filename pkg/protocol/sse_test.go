@@ -62,6 +62,24 @@ func TestSSEReader(t *testing.T) {
 			wantTypes: []string{"message", "message"},
 		},
 		{
+			name:      "bare CR line endings",
+			stream:    "data: x\r\rdata: y\rdata: z\r\r",
+			wantData:  []string{"x", "y\nz"},
+			wantTypes: []string{"message", "message"},
+		},
+		{
+			name:      "mixed CR, LF and CRLF",
+			stream:    "id: 1\rdata: a\r\ndata: b\n\r\n",
+			wantData:  []string{"a\nb"},
+			wantTypes: []string{"message"},
+		},
+		{
+			name:      "a CR at the end of the stream",
+			stream:    "data: x\r",
+			wantData:  []string{"x"},
+			wantTypes: []string{"message"},
+		},
+		{
 			name:      "leading blank lines and a BOM are skipped",
 			stream:    "\xef\xbb\xbf\n\ndata: x\n\n",
 			wantData:  []string{"x"},

@@ -83,7 +83,7 @@ func (e *SSEEvent) WithData(data []byte) SSEEvent {
 }
 
 type SSEReader struct {
-	reader  *bufio.Reader
+	scanner *bufio.Scanner
 	limit   int64
 	started bool
 }
@@ -92,7 +92,48 @@ func NewSSEReader(r io.Reader, limit int64) *SSEReader {
 	if limit <= 0 || limit > MaxLineBytes {
 		limit = MaxLineBytes
 	}
-	return &SSEReader{reader: bufio.NewReaderSize(r, 64*1024), limit: limit}
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), int(limit)+sseLineOverhead)
+	scanner.Split(scanSSELines)
+	return &SSEReader{scanner: scanner, limit: limit}
+}
+
+func scanSSELines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		if data[i] == '\n' {
+			return i + 1, data[:i], nil
+		}
+		if i+1 < len(data) {
+			if data[i+1] == '\n' {
+				return i + 2, data[:i], nil
+			}
+			return i + 1, data[:i], nil
+		}
+		if atEOF {
+			return i + 1, data[:i], nil
+		}
+		return 0, nil, nil
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+func (s *SSEReader) readLine() ([]byte, error) {
+	if s.scanner.Scan() {
+		return s.scanner.Bytes(), nil
+	}
+	if err := s.scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return nil, fmt.Errorf("%w: a line is over %d bytes", ErrSSEEventTooLarge, s.limit)
+		}
+		return nil, fmt.Errorf("reading SSE stream: %w", err)
+	}
+	return nil, io.EOF
 }
 
 func (s *SSEReader) Next() (*SSEEvent, error) {
@@ -100,22 +141,14 @@ func (s *SSEReader) Next() (*SSEEvent, error) {
 	var dataBytes, eventBytes int64
 	dataLines := 0
 	for {
-		line, err := readLimitedLine(s.reader, int(s.limit)+sseLineOverhead)
+		line, err := s.readLine()
 		if err != nil {
 			if errors.Is(err, io.EOF) && len(ev.Fields) > 0 {
 				return ev, nil
 			}
-			if errors.Is(err, io.EOF) {
-				return nil, io.EOF
-			}
-			if errors.Is(err, ErrFrameTooLarge) {
-				return nil, fmt.Errorf("%w: a line is over %d bytes", ErrSSEEventTooLarge, s.limit)
-			}
-			return nil, fmt.Errorf("reading SSE stream: %w", err)
+			return nil, err
 		}
 
-		line = bytes.TrimSuffix(line, []byte("\n"))
-		line = bytes.TrimSuffix(line, []byte("\r"))
 		if !s.started {
 			line = bytes.TrimPrefix(line, []byte("\xef\xbb\xbf"))
 			s.started = true
