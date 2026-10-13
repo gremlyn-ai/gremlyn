@@ -1207,3 +1207,44 @@ func TestHTTPProxy_StreamFailuresAreCountedWhenNobodyWaits(t *testing.T) {
 		})
 	}
 }
+
+func TestHTTPProxy_ErrorStatusesFromTheUpstream(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      int
+		session     string
+		wantFailure int
+	}{
+		{"a 503 carrying a JSON-RPC error", http.StatusServiceUnavailable, "", 1},
+		{"a 500", http.StatusInternalServerError, "s1", 1},
+		{"a 404 on a session: it expired", http.StatusNotFound, "s1", 1},
+		{"a 404 without a session", http.StatusNotFound, "", 0},
+		{"a 400 is the agent's problem", http.StatusBadRequest, "s1", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			up := newUpstream(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"down"}}`)
+			})
+			rec := &recorder{}
+			pipeline := NewPipeline(zerolog.Nop())
+			pipeline.RegisterHandler(rec.stage())
+			p := startHTTPProxy(t, up.URL, pipeline, zerolog.Nop(), nil)
+
+			header := map[string]string{}
+			if tt.session != "" {
+				header["Mcp-Session-Id"] = tt.session
+			}
+			got := call(t, http.MethodPost, p.URL(), toolCall, header)
+			assert.Equal(t, tt.status, got.status)
+			assert.Contains(t, got.body, `"down"`)
+			assert.Equal(t, tt.wantFailure, p.Stats().Failures)
+
+			in := rec.incoming()
+			require.Len(t, in, 1, "the JSON-RPC error goes through the pipeline")
+			assert.Equal(t, "tools/call", in[0].correlated, "and consumes the correlator entry")
+		})
+	}
+}

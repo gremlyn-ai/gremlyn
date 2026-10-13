@@ -600,7 +600,7 @@ func (h *HTTPProxy) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
-	h.passThrough(w, resp, nil)
+	h.passThrough(r.Context(), w, resp, r.Header.Get(headerSessionID), nil)
 }
 
 func (h *HTTPProxy) forward(ctx context.Context, r *http.Request, method string, body []byte) (*http.Response, error) {
@@ -696,7 +696,7 @@ func (h *HTTPProxy) relayResponse(w http.ResponseWriter, r *http.Request, resp *
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		h.setDiagnostic(fmt.Errorf("%w (HTTP %d)", ErrUpstreamUnauthorized, resp.StatusCode))
 		h.logger.Error().Int("status", resp.StatusCode).Msg(ErrUpstreamUnauthorized.Error())
-		h.passThrough(w, resp, dog)
+		h.passThrough(r.Context(), w, resp, session, dog)
 		return
 	case resp.StatusCode >= 300 && resp.StatusCode < 400:
 		h.setDiagnostic(ErrUpstreamRedirect)
@@ -704,7 +704,14 @@ func (h *HTTPProxy) relayResponse(w http.ResponseWriter, r *http.Request, resp *
 		writeRPCError(w, http.StatusBadGateway, requestID(reqMsg), UpstreamErrorCode, "gremlyn: "+ErrUpstreamRedirect.Error())
 		return
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
-		h.passThrough(w, resp, dog)
+		if resp.StatusCode >= 500 || (resp.StatusCode == http.StatusNotFound && session != "") {
+			h.countFailure()
+			h.logger.Warn().
+				Int("status", resp.StatusCode).
+				Str("method", methodOf(reqMsg)).
+				Msg("the upstream answered with an error status")
+		}
+		h.passThrough(r.Context(), w, resp, session, dog)
 		return
 	}
 
@@ -714,7 +721,7 @@ func (h *HTTPProxy) relayResponse(w http.ResponseWriter, r *http.Request, resp *
 	case contentTypeJSON:
 		h.relayJSON(w, r, resp, reqMsg, session, dog)
 	default:
-		h.passThrough(w, resp, dog)
+		h.passThrough(r.Context(), w, resp, session, dog)
 	}
 }
 
@@ -917,7 +924,7 @@ func (h *HTTPProxy) endSSE(upstreamCtx context.Context, w http.ResponseWriter, r
 	}
 }
 
-func (h *HTTPProxy) passThrough(w http.ResponseWriter, resp *http.Response, dog *watchdog) {
+func (h *HTTPProxy) passThrough(ctx context.Context, w http.ResponseWriter, resp *http.Response, session string, dog *watchdog) {
 	if dog != nil {
 		dog.arm()
 	}
@@ -935,6 +942,9 @@ func (h *HTTPProxy) passThrough(w http.ResponseWriter, resp *http.Response, dog 
 		h.countFailure()
 		w.WriteHeader(http.StatusBadGateway)
 		return
+	}
+	if mediaType(resp.Header) == contentTypeJSON && len(bytes.TrimSpace(body)) > 0 && !protocol.IsBatch(body) {
+		body, _ = h.processIncoming(ctx, body, session)
 	}
 	copyHeaders(w.Header(), resp.Header, "Content-Length", "WWW-Authenticate")
 	if len(body) > 0 {
