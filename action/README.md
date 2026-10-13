@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # ...whatever your agent needs to run, and its API key...
-      - uses: gremlyn-ai/gremlyn/action@v0.1.0
+      - uses: gremlyn-ai/gremlyn/action@v0.1.1
         with:
           config: .gremlyn/arena.yaml
 ```
