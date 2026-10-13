@@ -3,6 +3,9 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -64,6 +67,7 @@ type HTTPStats struct {
 type HTTPProxy struct {
 	cfg        HTTPConfig
 	upstream   *url.URL
+	path       string
 	pipeline   *Pipeline
 	logger     zerolog.Logger
 	maxPayload int64
@@ -101,12 +105,18 @@ func NewHTTPProxy(cfg HTTPConfig, opts ...Option) (*HTTPProxy, error) {
 		timeout = DefaultRequestTimeout
 	}
 
+	secret := make([]byte, 16)
+	if _, err := rand.Read(secret); err != nil {
+		return nil, fmt.Errorf("generating the proxy's secret path: %w", err)
+	}
+
 	o := applyOptions(opts)
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 
 	h := &HTTPProxy{
 		cfg:        cfg,
 		upstream:   upstream,
+		path:       EndpointPath + "/" + hex.EncodeToString(secret),
 		pipeline:   o.pipeline,
 		logger:     o.logger.With().Str("component", "http-proxy").Str("server", cfg.ServerName).Logger(),
 		maxPayload: o.maxPayload,
@@ -259,7 +269,7 @@ func (h *HTTPProxy) Start(ctx context.Context) error {
 		}
 	}()
 	h.logger.Info().
-		Str("listen", h.URL()).
+		Str("listen", ln.Addr().String()).
 		Str("upstream", RedactURL(h.upstream)).
 		Msg("http proxy started")
 	return nil
@@ -269,7 +279,7 @@ func (h *HTTPProxy) URL() string {
 	if h.listener == nil {
 		return ""
 	}
-	return "http://" + h.listener.Addr().String() + EndpointPath
+	return "http://" + h.listener.Addr().String() + h.path
 }
 
 func (h *HTTPProxy) Shutdown(ctx context.Context) error {
@@ -338,7 +348,11 @@ func (h *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gremlyn proxy: cross-origin requests are refused", http.StatusForbidden)
 		return
 	}
-	if r.URL.Path != EndpointPath {
+	if crossSiteFetch(r.Header) {
+		http.Error(w, "gremlyn proxy: browser cross-site requests are refused", http.StatusForbidden)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(r.URL.Path), []byte(h.path)) != 1 {
 		http.NotFound(w, r)
 		return
 	}
@@ -354,6 +368,18 @@ func (h *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST, DELETE")
 		http.Error(w, "gremlyn proxy: method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func crossSiteFetch(header http.Header) bool {
+	switch strings.ToLower(header.Get("Sec-Fetch-Site")) {
+	case "cross-site", "same-site":
+		return true
+	}
+	switch strings.ToLower(header.Get("Sec-Fetch-Mode")) {
+	case "navigate", "no-cors":
+		return true
+	}
+	return false
 }
 
 func loopbackOrigin(origin string) bool {

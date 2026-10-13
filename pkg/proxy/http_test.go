@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -421,7 +422,13 @@ func TestHTTPProxy_MethodsAndStatuses(t *testing.T) {
 		{"a notification is accepted", http.MethodPost, p.URL(), `{"jsonrpc":"2.0","method":"notifications/initialized"}`, nil, http.StatusAccepted},
 		{"GET 405 passes through", http.MethodGet, p.URL(), "", nil, http.StatusMethodNotAllowed},
 		{"DELETE ends the session upstream", http.MethodDelete, p.URL(), "", map[string]string{"Mcp-Session-Id": "s1"}, http.StatusNoContent},
-		{"another path is not the endpoint", http.MethodPost, strings.TrimSuffix(p.URL(), "/mcp") + "/.well-known/oauth-protected-resource", "", nil, http.StatusNotFound},
+		{"another path is not the endpoint", http.MethodPost, origin(p) + "/.well-known/oauth-protected-resource", "", nil, http.StatusNotFound},
+		{"the bare /mcp path is not the endpoint", http.MethodPost, origin(p) + "/mcp", toolCall, nil, http.StatusNotFound},
+		{"a wrong secret is not the endpoint", http.MethodPost, origin(p) + "/mcp/" + strings.Repeat("0", 32), toolCall, nil, http.StatusNotFound},
+		{"a cross-site browser fetch is refused", http.MethodPost, p.URL(), toolCall, map[string]string{"Sec-Fetch-Site": "cross-site"}, http.StatusForbidden},
+		{"a same-site browser fetch is refused", http.MethodPost, p.URL(), toolCall, map[string]string{"Sec-Fetch-Site": "same-site"}, http.StatusForbidden},
+		{"a navigation is refused", http.MethodGet, p.URL(), "", map[string]string{"Sec-Fetch-Mode": "navigate"}, http.StatusForbidden},
+		{"a no-cors fetch is refused", http.MethodGet, p.URL(), "", map[string]string{"Sec-Fetch-Mode": "no-cors"}, http.StatusForbidden},
 		{"PUT is not a Streamable HTTP method", http.MethodPut, p.URL(), "", nil, http.StatusMethodNotAllowed},
 		{"a foreign Host is refused", http.MethodPost, p.URL(), toolCall, map[string]string{"Host": "evil.example"}, http.StatusForbidden},
 		{"a foreign Origin is refused", http.MethodPost, p.URL(), toolCall, map[string]string{"Origin": "https://evil.example"}, http.StatusForbidden},
@@ -1017,4 +1024,31 @@ func TestHTTPProxy_UpstreamTextNeverReachesTheLogs(t *testing.T) {
 	assert.Contains(t, logs.String(), "not a JSON-RPC message")
 	assert.NotContains(t, logs.String(), "attacker_chosen_key")
 	assert.NotContains(t, logs.String(), "payload-text")
+}
+
+func origin(p *HTTPProxy) string {
+	u, err := url.Parse(p.URL())
+	if err != nil {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+func TestHTTPProxy_SecretPath(t *testing.T) {
+	up := newUpstream(t, jsonUpstream(t, `{}`))
+	var logs syncBuffer
+	first := startHTTPProxy(t, up.URL, nil, zerolog.New(&logs).Level(zerolog.DebugLevel), nil)
+	second := startHTTPProxy(t, up.URL, nil, zerolog.Nop(), nil)
+
+	assert.Regexp(t, `^http://127\.0\.0\.1:[0-9]+/mcp/[0-9a-f]{32}$`, first.URL())
+	assert.NotEqual(t, strings.TrimPrefix(first.URL(), origin(first)), strings.TrimPrefix(second.URL(), origin(second)),
+		"each proxy draws its own secret path")
+
+	for _, target := range []string{origin(first) + "/mcp", origin(first) + "/mcp/", first.URL() + "x", origin(first) + strings.TrimPrefix(second.URL(), origin(second))} {
+		assert.Equal(t, http.StatusNotFound, call(t, http.MethodPost, target, toolCall, nil).status, target)
+	}
+	assert.Empty(t, up.recorded(), "a request without the secret path never reaches the upstream")
+
+	assert.Equal(t, http.StatusOK, call(t, http.MethodPost, first.URL(), toolCall, nil).status)
+	assert.NotContains(t, logs.String(), strings.TrimPrefix(first.URL(), origin(first)+"/mcp/"), "the secret path is never logged")
 }
