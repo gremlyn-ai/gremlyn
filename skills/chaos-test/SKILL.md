@@ -84,6 +84,20 @@ thresholds:
   min_overall: 50
 ```
 
+If the agent's MCP server is remote, over Streamable HTTP, replace `command` with `url` and
+the headers it needs. A header value references an environment variable as `${VAR}`; never
+write a token into the file. The `url` is `https`, or `http` on a loopback address. The agent
+then receives an `{"type": "http", "url": ...}` entry pointing at a local proxy, so it must
+accept HTTP servers in its MCP config.
+
+```yaml
+mcp_server:
+  name: acme
+  url: https://mcp.acme.example/mcp
+  headers:
+    Authorization: "Bearer ${ACME_MCP_TOKEN}"
+```
+
 `mcp_server.name` is the server name the agent expects in `mcpServers`. `agent.env` adds
 environment variables to the agent. `intensity` is `low`, `medium`, `high` or `certain`.
 Gremlins available: `timeout`, `latency`, `corruption`, `hallucination`, `injection`,
