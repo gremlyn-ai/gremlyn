@@ -114,6 +114,9 @@ func expandEnvRefs(what, value string, lookup envLookup, used map[string]bool) (
 		if !validEnvName(ref) {
 			return "", fmt.Errorf("%s: an invalid variable reference in its value, expected ${NAME}", what)
 		}
+		if ciCredentialVar(ref) {
+			return "", fmt.Errorf("%s: ${%s} is a CI credential variable, which gremlyn never sends to a server", what, ref)
+		}
 		v, ok := lookup(ref)
 		if !ok || v == "" {
 			return "", fmt.Errorf("%s: environment variable %s is not set", what, ref)
@@ -130,6 +133,10 @@ func expandEnvRefs(what, value string, lookup envLookup, used map[string]bool) (
 		return "", fmt.Errorf("%s: its value contains a line break or a NUL byte", what)
 	}
 	return out, nil
+}
+
+func ciCredentialVar(name string) bool {
+	return name == "GH_TOKEN" || strings.HasPrefix(name, "GITHUB_") || strings.HasPrefix(name, "ACTIONS_")
 }
 
 func validEnvName(s string) bool {

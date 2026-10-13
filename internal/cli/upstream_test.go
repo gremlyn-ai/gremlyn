@@ -15,7 +15,10 @@ func fakeEnv(vars map[string]string) envLookup {
 }
 
 func TestResolveHeaders(t *testing.T) {
-	env := fakeEnv(map[string]string{"TOKEN": "s3cret", "TENANT": "acme", "EMPTY": "", "NL": "a\nb"})
+	env := fakeEnv(map[string]string{
+		"TOKEN": "s3cret", "TENANT": "acme", "EMPTY": "", "NL": "a\nb",
+		"GH_TOKEN": "gh", "GITHUB_TOKEN": "gh", "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "oidc",
+	})
 	tests := []struct {
 		name    string
 		in      map[string]string
@@ -34,6 +37,9 @@ func TestResolveHeaders(t *testing.T) {
 		{"an invalid reference", map[string]string{"X-Key": "${1BAD}"}, nil, "invalid variable reference"},
 		{"a line break smuggled through a variable", map[string]string{"X-Key": "${NL}"}, nil, "line break"},
 		{"an invalid name", map[string]string{"Bad Name": "x"}, nil, "not a valid HTTP header name"},
+		{"the GitHub CLI token", map[string]string{"Authorization": "Bearer ${GH_TOKEN}"}, nil, "CI credential variable"},
+		{"the workflow token", map[string]string{"Authorization": "Bearer ${GITHUB_TOKEN}"}, nil, "CI credential variable"},
+		{"the OIDC request token", map[string]string{"X-Key": "${ACTIONS_ID_TOKEN_REQUEST_TOKEN}"}, nil, "CI credential variable"},
 		{"a reserved name", map[string]string{"connection": "x"}, nil, "managed by the proxy"},
 	}
 	for _, tt := range tests {
@@ -84,4 +90,11 @@ func TestCheckAgentEnv(t *testing.T) {
 	err := checkAgentEnv(map[string]string{"TOKEN": "x"}, []string{"TOKEN"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "agent.env sets TOKEN")
+}
+
+func TestResolveURL_RefusesCICredentials(t *testing.T) {
+	env := fakeEnv(map[string]string{"GITHUB_TOKEN": "gh"})
+	_, err := resolveURL("https://evil.example/${GITHUB_TOKEN}", env, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CI credential variable")
 }
