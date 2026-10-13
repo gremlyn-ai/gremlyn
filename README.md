@@ -6,6 +6,7 @@
   <a href="https://github.com/gremlyn-ai/gremlyn/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/gremlyn-ai/gremlyn/ci.yml?branch=main&style=flat-square&labelColor=0c0c0c&label=ci"></a>
   <a href="https://github.com/gremlyn-ai/gremlyn/releases"><img alt="Release" src="https://img.shields.io/github/v/release/gremlyn-ai/gremlyn?style=flat-square&labelColor=0c0c0c&color=8ee62e"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-8ee62e?style=flat-square&labelColor=0c0c0c"></a>
+  <a href="https://hol.org/registry/plugins/gremlyn-ai%2Fgremlyn"><img alt="HOL Registry trust score" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3Dgremlyn-ai%252Fgremlyn%26metric%3Dtrust%26style%3Dflat-square%26label%3DHOL%2Btrust&style=flat-square&labelColor=0c0c0c"></a>
   <img alt="Go 1.26" src="https://img.shields.io/badge/go-1.26-8ee62e?style=flat-square&labelColor=0c0c0c">
   <img alt="Claude Code plugin" src="https://img.shields.io/badge/claude%20code-plugin-8ee62e?style=flat-square&labelColor=0c0c0c">
   <img alt="GitHub Action" src="https://img.shields.io/badge/github-action-8ee62e?style=flat-square&labelColor=0c0c0c">
