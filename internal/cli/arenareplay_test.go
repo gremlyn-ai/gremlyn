@@ -173,12 +173,12 @@ func TestReplay_HTTPUpstream(t *testing.T) {
 		Gremlins:  []string{"timeout"},
 		Seed:      42,
 		Intensity: "certain",
-		ServerURL: "https://mcp.example.com/mcp",
+		ServerURL: "https://mcp.example.com/…",
 	})
 
 	out, _, err := runReplay(t, path)
 	require.NoError(t, err)
-	assert.Contains(t, out, "--upstream https://mcp.example.com/mcp")
+	assert.Contains(t, out, "--upstream 'https://mcp.example.com/<path not recorded>'")
 	assert.Contains(t, out, "--upstream-header")
 	assert.NotContains(t, out, " -- ", "an HTTP upstream has no child command")
 }

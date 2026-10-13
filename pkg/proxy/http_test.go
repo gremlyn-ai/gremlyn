@@ -583,7 +583,7 @@ func TestHTTPProxy_UpstreamTimeoutIsNotAGremlin(t *testing.T) {
 
 func TestHTTPProxy_UnreachableUpstream(t *testing.T) {
 	dead := httptest.NewServer(http.NotFoundHandler())
-	deadURL := dead.URL + "/mcp?token=query-secret"
+	deadURL := dead.URL + "/path-secret/mcp?token=query-secret"
 	dead.Close()
 
 	var logs syncBuffer
@@ -594,6 +594,7 @@ func TestHTTPProxy_UnreachableUpstream(t *testing.T) {
 	assert.JSONEq(t, `7`, string(e.ID))
 	assert.Equal(t, 1, p.Stats().Failures)
 	assert.NotContains(t, logs.String(), "query-secret", "the URL's query is never logged")
+	assert.NotContains(t, logs.String(), "path-secret", "nor its path")
 }
 
 func TestHTTPProxy_Unauthorized(t *testing.T) {
@@ -975,8 +976,18 @@ func TestNewHTTPProxy_RefusesReservedHeaders(t *testing.T) {
 func TestRedactURL(t *testing.T) {
 	_, err := ValidateUpstreamURL("https://mcp.example.com/mcp?key=secret")
 	require.NoError(t, err)
-	u, _ := ValidateUpstreamURL("https://mcp.example.com/mcp?key=secret")
-	assert.Equal(t, "https://mcp.example.com/mcp", RedactURL(u))
+	tests := []struct{ in, want string }{
+		{"https://mcp.example.com/mcp?key=secret", "https://mcp.example.com/…"},
+		{"https://mcp.example.com/v1/tok3n/mcp", "https://mcp.example.com/…"},
+		{"https://mcp.example.com:8443", "https://mcp.example.com:8443"},
+		{"https://mcp.example.com/", "https://mcp.example.com"},
+		{"http://127.0.0.1:9/mcp", "http://127.0.0.1:9/…"},
+	}
+	for _, tt := range tests {
+		u, err := ValidateUpstreamURL(tt.in)
+		require.NoError(t, err)
+		assert.Equal(t, tt.want, RedactURL(u), tt.in)
+	}
 	assert.Empty(t, RedactURL(nil))
 }
 

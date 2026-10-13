@@ -187,7 +187,11 @@ func RedactURL(u *url.URL) string {
 	if u == nil {
 		return ""
 	}
-	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
+	out := u.Scheme + "://" + u.Host
+	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Opaque != "" {
+		out += "/…"
+	}
+	return out
 }
 
 func requireLoopbackAddr(addr net.Addr) error {

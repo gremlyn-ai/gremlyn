@@ -39,6 +39,22 @@ func resolveHeaders(raw map[string]string, lookup envLookup) (map[string]string,
 }
 
 func expandHeaderValue(name, value string, lookup envLookup) (string, error) {
+	what := fmt.Sprintf("header %q", name)
+	out, err := expandEnvRefs(what, value, lookup)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out) == "" {
+		return "", fmt.Errorf("%s has an empty value", what)
+	}
+	return out, nil
+}
+
+func resolveURL(raw string, lookup envLookup) (string, error) {
+	return expandEnvRefs("url", raw, lookup)
+}
+
+func expandEnvRefs(what, value string, lookup envLookup) (string, error) {
 	var b strings.Builder
 	rest := value
 	for {
@@ -50,26 +66,23 @@ func expandHeaderValue(name, value string, lookup envLookup) (string, error) {
 		b.WriteString(rest[:start])
 		end := strings.IndexByte(rest[start+2:], '}')
 		if end < 0 {
-			return "", fmt.Errorf("header %q: an unterminated ${ in its value", name)
+			return "", fmt.Errorf("%s: an unterminated ${ in its value", what)
 		}
 		ref := rest[start+2 : start+2+end]
 		if !validEnvName(ref) {
-			return "", fmt.Errorf("header %q: an invalid variable reference in its value, expected ${NAME}", name)
+			return "", fmt.Errorf("%s: an invalid variable reference in its value, expected ${NAME}", what)
 		}
 		v, ok := lookup(ref)
 		if !ok || v == "" {
-			return "", fmt.Errorf("header %q: environment variable %s is not set", name, ref)
+			return "", fmt.Errorf("%s: environment variable %s is not set", what, ref)
 		}
 		b.WriteString(v)
 		rest = rest[start+2+end+1:]
 	}
 
 	out := b.String()
-	if strings.TrimSpace(out) == "" {
-		return "", fmt.Errorf("header %q has an empty value", name)
-	}
 	if strings.ContainsAny(out, "\r\n\x00") {
-		return "", fmt.Errorf("header %q: its value contains a line break or a NUL byte", name)
+		return "", fmt.Errorf("%s: its value contains a line break or a NUL byte", what)
 	}
 	return out, nil
 }
@@ -140,7 +153,11 @@ func validateMCPServer(srv *MCPServerConfig, lookup envLookup) error {
 		return nil
 	}
 
-	if _, err := proxy.ValidateUpstreamURL(srv.URL); err != nil {
+	resolved, err := resolveURL(srv.URL, lookup)
+	if err != nil {
+		return fmt.Errorf("mcp_server.%w", err)
+	}
+	if _, err := proxy.ValidateUpstreamURL(resolved); err != nil {
 		return fmt.Errorf("mcp_server.%w", err)
 	}
 	if srv.RequestTimeout < 0 {

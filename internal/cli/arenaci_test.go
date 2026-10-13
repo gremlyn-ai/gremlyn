@@ -51,6 +51,18 @@ func TestValidateCIConfig(t *testing.T) {
 		{"neither command nor url", func(c *CIConfig) { c.MCPServer.Command = nil }, "needs command (stdio) or url"},
 		{"both command and url", func(c *CIConfig) { c.MCPServer.URL = "https://mcp.acme.example/mcp" }, "not both"},
 		{"an https url with an expanded header", httpServer, ""},
+		{"a url with a variable", func(c *CIConfig) {
+			httpServer(c)
+			c.MCPServer.URL = "https://mcp.acme.example/${GREMLYN_TEST_TOKEN}/mcp"
+		}, ""},
+		{"a url with a missing variable", func(c *CIConfig) {
+			httpServer(c)
+			c.MCPServer.URL = "https://mcp.acme.example/${GREMLYN_TEST_UNSET_VAR}/mcp"
+		}, "url: environment variable GREMLYN_TEST_UNSET_VAR is not set"},
+		{"a url with an empty variable", func(c *CIConfig) {
+			httpServer(c)
+			c.MCPServer.URL = "https://${GREMLYN_TEST_EMPTY}/mcp"
+		}, "GREMLYN_TEST_EMPTY is not set"},
 		{"plain http on loopback", func(c *CIConfig) {
 			httpServer(c)
 			c.MCPServer.URL = "http://127.0.0.1:8080/mcp"

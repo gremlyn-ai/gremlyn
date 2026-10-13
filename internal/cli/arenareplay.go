@@ -76,8 +76,8 @@ func replayCommand(s chaos.SessionSummary) (string, error) {
 
 	if s.ServerURL != "" {
 		parts = append(parts,
-			"--upstream "+shellArg(s.ServerURL),
-			"--upstream-header "+shellArg("<header values are never recorded: add each one your server needs>"))
+			"--upstream "+shellArg(strings.Replace(s.ServerURL, "/…", "/<path not recorded>", 1)),
+			"--upstream-header "+shellArg("<the path, the query and header values are never recorded: add them>"))
 		return strings.Join(parts, " \\\n  "), nil
 	}
 

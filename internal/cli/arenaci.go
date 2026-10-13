@@ -379,9 +379,13 @@ func startScenarioProxy(
 	if err != nil {
 		return nil, fmt.Errorf("mcp_server.headers: %w", err)
 	}
+	upstreamURL, err := resolveURL(srv.URL, os.LookupEnv)
+	if err != nil {
+		return nil, fmt.Errorf("mcp_server.%w", err)
+	}
 	return startHTTPChaos(ctx, upstreamTarget{
 		Name:           serverName(srv),
-		URL:            srv.URL,
+		URL:            upstreamURL,
 		Headers:        headers,
 		RequestTimeout: srv.RequestTimeout,
 	}, chaosSetup{

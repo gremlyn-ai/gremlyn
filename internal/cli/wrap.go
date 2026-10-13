@@ -76,13 +76,17 @@ environment, so a token can stay out of the command line: single-quote the flag.
 				if err != nil {
 					return fmt.Errorf("--upstream-header: %w", err)
 				}
+				target, err := resolveURL(upstreamURL, os.LookupEnv)
+				if err != nil {
+					return fmt.Errorf("--upstream: %w", err)
+				}
 				name := serverName
 				if name == "" {
 					name = "upstream"
 				}
 				return runUpstreamWrap(cmd, logger, upstreamTarget{
 					Name:           name,
-					URL:            upstreamURL,
+					URL:            target,
 					Headers:        headers,
 					ListenAddr:     listenAddr,
 					RequestTimeout: upstreamTimeout,

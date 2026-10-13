@@ -232,10 +232,13 @@ func TestArenaCI_HTTP_SecretsNeverReachAFile(t *testing.T) {
 	agentBin := buildRefAgent(t)
 	srv := newFakeHTTPMCP(t, modeSSE)
 
+	pathSecret := "p-" + uuid.NewString()
+	t.Setenv("GREMLYN_E2E_PATH", pathSecret)
+
 	var logs bytes.Buffer
 	logger := zerolog.New(&logs).Level(zerolog.DebugLevel)
-	res := runScenario(context.Background(), logger, "",
-		httpCIConfig(agentBin, "robust", srv.URL()), httpScenario("secrets", "injection", "timeout"), true)
+	cfg := httpCIConfig(agentBin, "robust", srv.Server.URL+"/${GREMLYN_E2E_PATH}/mcp")
+	res := runScenario(context.Background(), logger, "", cfg, httpScenario("secrets", "injection", "timeout"), true)
 	require.Positive(t, res.Coverage.Injected, "failures: %v", res.Failures)
 
 	assert.Contains(t, srv.authHeaders(), "Bearer "+token, "the configured header reaches the server")
@@ -263,6 +266,7 @@ func TestArenaCI_HTTP_SecretsNeverReachAFile(t *testing.T) {
 			}
 			scanned = append(scanned, filepath.Base(path))
 			assert.NotContains(t, string(data), token, "the header value leaked into %s", path)
+			assert.NotContains(t, string(data), pathSecret, "the URL path leaked into %s", path)
 			return nil
 		}))
 	}
@@ -271,13 +275,16 @@ func TestArenaCI_HTTP_SecretsNeverReachAFile(t *testing.T) {
 	}
 	assert.NotContains(t, console.String(), token)
 	assert.NotContains(t, logs.String(), token)
+	assert.NotContains(t, console.String(), pathSecret)
+	assert.NotContains(t, logs.String(), pathSecret)
 
 	sessions, err := os.ReadDir(filepath.Join(dataDir, "arena", "sessions"))
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 	session, err := os.ReadFile(filepath.Join(dataDir, "arena", "sessions", sessions[0].Name(), "session.json"))
 	require.NoError(t, err)
-	assert.Contains(t, string(session), srv.URL(), "the server is recorded by its URL")
+	assert.Contains(t, string(session), srv.Server.URL+"/…", "the server is recorded by scheme and host")
+	assert.NotContains(t, string(session), "/mcp", "never by its path")
 }
 
 func TestArenaCI_HTTP_WritesTheClaudeCodeHTTPConfig(t *testing.T) {
@@ -426,7 +433,7 @@ func TestWrapCmd_Upstream(t *testing.T) {
 	summary, err := chaos.ReadSummary(summaryPath)
 	require.NoError(t, err)
 	assert.Equal(t, 1, summary.Coverage.Injected)
-	assert.Equal(t, srv.URL(), summary.ServerURL)
+	assert.Equal(t, srv.Server.URL+"/…", summary.ServerURL)
 	assert.Empty(t, summary.ServerCommand)
 
 	events, _, err := chaos.ReadEvents(eventsPath)
