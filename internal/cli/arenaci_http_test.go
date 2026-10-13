@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -493,4 +494,34 @@ func TestWrapCmd_UpstreamFlagValidation(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.want)
 		})
 	}
+}
+
+func readOnlySession(t *testing.T, dataDir string) map[string]any {
+	t.Helper()
+	dirs, err := os.ReadDir(filepath.Join(dataDir, "arena", "sessions"))
+	require.NoError(t, err)
+	require.Len(t, dirs, 1)
+	data, err := os.ReadFile(filepath.Join(dataDir, "arena", "sessions", dirs[0].Name(), "session.json"))
+	require.NoError(t, err)
+	var session map[string]any
+	require.NoError(t, json.Unmarshal(data, &session))
+	return session
+}
+
+func TestWrapCmd_UpstreamThatCannotListenFailsTheSession(t *testing.T) {
+	dataDir, _, _ := isolateRunFiles(t)
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = busy.Close() })
+
+	cmd := NewWrapCmd(zerolog.Nop())
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--upstream", "https://mcp.example.com/mcp",
+		"--listen", busy.Addr().String(),
+		"--chaos-gremlins", "timeout",
+	})
+	require.Error(t, cmd.Execute())
+	assert.Equal(t, "failed", readOnlySession(t, dataDir)["status"], "a run that never started is not left running")
 }

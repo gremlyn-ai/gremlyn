@@ -117,6 +117,11 @@ func (r *chaosRun) finish(ctx context.Context, runErr error, ended bool, upstrea
 	}
 }
 
+func (r *chaosRun) abort(ctx context.Context, err error) {
+	r.finish(ctx, err, false, chaos.UpstreamStats{})
+	r.close()
+}
+
 func (r *chaosRun) close() {
 	r.pipeline.Close()
 	if r.eventSink != nil {
@@ -159,12 +164,14 @@ func startHTTPChaos(ctx context.Context, target upstreamTarget, setup chaosSetup
 		RequestTimeout: target.RequestTimeout,
 	}, proxy.WithLogger(logger), proxy.WithPipeline(run.pipeline))
 	if err != nil {
-		run.close()
-		return nil, fmt.Errorf("configuring the http proxy: %w", err)
+		err = fmt.Errorf("configuring the http proxy: %w", err)
+		run.abort(ctx, err)
+		return nil, err
 	}
 	if err := p.Start(ctx); err != nil {
-		run.close()
-		return nil, fmt.Errorf("starting the http proxy: %w", err)
+		err = fmt.Errorf("starting the http proxy: %w", err)
+		run.abort(ctx, err)
+		return nil, err
 	}
 	return &httpChaos{run: run, proxy: p}, nil
 }
