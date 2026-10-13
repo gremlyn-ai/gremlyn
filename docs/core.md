@@ -133,8 +133,8 @@ process only:
 - nothing in the logs, `mcp.json`, `session.json`, `events.jsonl`, `summary.json`, the report
   or the PR comment contains a header value.
 
-The GitHub Action runs `arena ci` without its GitHub token in the environment and hands the
-token only to the commands that fetch the baseline.
+The GitHub Action unsets its GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`) for the `arena ci` call,
+so neither the agent nor the proxy can read it.
 
 **Getting a token for your own server.** Use whatever your server accepts as a static
 credential: an API key, a personal access token, or a long-lived token minted for a test
