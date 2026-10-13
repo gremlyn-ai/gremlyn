@@ -331,3 +331,46 @@ func TestPipeline_CloseIsIdempotent(t *testing.T) {
 		p.Close()
 	})
 }
+
+func TestPipeline_CorrelationIsScopedBySession(t *testing.T) {
+	tests := []struct {
+		name         string
+		reqSession   string
+		respSession  string
+		wantMatched  bool
+		secondLookup bool
+	}{
+		{"same session", "s1", "s1", true, false},
+		{"no session on either side, as on stdio", "", "", true, false},
+		{"another session reusing the id", "s1", "s2", false, false},
+		{"a response is matched once", "s1", "s1", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pipeline := NewPipeline(zerolog.Nop())
+			t.Cleanup(pipeline.Close)
+
+			_, _, err := pipeline.Process(context.Background(), newTestMsg(),
+				&MessageContext{Direction: models.DirectionOutgoing, Session: tt.reqSession})
+			require.NoError(t, err)
+
+			resp := &protocol.Message{
+				Type: protocol.MessageTypeResponse,
+				Response: &protocol.JSONRPCResponse{
+					JSONRPC: "2.0", ID: protocol.NewIntID(1), Result: json.RawMessage(`{}`),
+				},
+			}
+			in := &MessageContext{Direction: models.DirectionIncoming, Session: tt.respSession}
+			_, _, err = pipeline.Process(context.Background(), resp, in)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantMatched, in.CorrelatedRequest != nil)
+
+			if tt.secondLookup {
+				again := &MessageContext{Direction: models.DirectionIncoming, Session: tt.respSession}
+				_, _, err = pipeline.Process(context.Background(), resp, again)
+				require.NoError(t, err)
+				assert.Nil(t, again.CorrelatedRequest, "a duplicate response must not be matched twice")
+			}
+		})
+	}
+}

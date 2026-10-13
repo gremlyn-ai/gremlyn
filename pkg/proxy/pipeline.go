@@ -33,6 +33,7 @@ type Decision struct {
 
 type MessageContext struct {
 	ServerName        string              `json:"server_name"`
+	Session           string              `json:"session,omitempty"`
 	Direction         models.Direction    `json:"direction"`
 	Timestamp         time.Time           `json:"timestamp"`
 	RequestID         *protocol.JSONRPCID `json:"request_id,omitempty"`
@@ -101,11 +102,11 @@ func (p *Pipeline) RegisterHandler(h Handler) {
 
 func (p *Pipeline) Process(ctx context.Context, msg *protocol.Message, mctx *MessageContext) (*Decision, *protocol.Message, error) {
 	if mctx.Direction == models.DirectionOutgoing && msg.Type == protocol.MessageTypeRequest {
-		p.correlator.TrackRequest(msg)
+		p.correlator.track(mctx.Session, msg)
 	}
 
 	if mctx.Direction == models.DirectionIncoming && msg.Type == protocol.MessageTypeResponse {
-		correlated := p.correlator.CorrelateResponse(msg)
+		correlated := p.correlator.correlate(mctx.Session, msg)
 		if correlated != nil {
 			mctx.CorrelatedRequest = correlated
 		}
@@ -187,21 +188,34 @@ func (rc *RequestCorrelator) Close() {
 }
 
 func (rc *RequestCorrelator) TrackRequest(msg *protocol.Message) {
+	rc.track("", msg)
+}
+
+func (rc *RequestCorrelator) CorrelateResponse(msg *protocol.Message) *protocol.Message {
+	return rc.correlate("", msg)
+}
+
+type correlationKey struct {
+	session string
+	id      string
+}
+
+func (rc *RequestCorrelator) track(session string, msg *protocol.Message) {
 	if msg.Type != protocol.MessageTypeRequest || msg.Request == nil {
 		return
 	}
-	key := msg.Request.ID.String()
+	key := correlationKey{session: session, id: msg.Request.ID.String()}
 	rc.pending.Store(key, &correlatedEntry{
 		msg:       msg,
 		timestamp: time.Now(),
 	})
 }
 
-func (rc *RequestCorrelator) CorrelateResponse(msg *protocol.Message) *protocol.Message {
+func (rc *RequestCorrelator) correlate(session string, msg *protocol.Message) *protocol.Message {
 	if msg.Type != protocol.MessageTypeResponse || msg.Response == nil {
 		return nil
 	}
-	key := msg.Response.ID.String()
+	key := correlationKey{session: session, id: msg.Response.ID.String()}
 	val, ok := rc.pending.LoadAndDelete(key)
 	if !ok {
 		return nil
