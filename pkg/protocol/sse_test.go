@@ -262,3 +262,9 @@ func TestSSEReader_BareFieldFloodStaysSmall(t *testing.T) {
 	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(8<<20),
 		"a flood of empty fields must be refused before it is held in memory")
 }
+
+func TestParseMessage_ErrorNeverEchoesThePeersKeys(t *testing.T) {
+	_, err := ParseMessage([]byte(`{"jsonrpc":"2.0","attacker_chosen_key":1}`))
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "attacker_chosen_key")
+}

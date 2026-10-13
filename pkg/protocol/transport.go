@@ -233,7 +233,7 @@ func parseRawMessage(data []byte) (*Message, error) {
 		msg.Response = &resp
 
 	default:
-		return nil, fmt.Errorf("cannot determine JSON-RPC message type from fields: %v", keysOf(raw))
+		return nil, errors.New("cannot determine the JSON-RPC message type: no method, and no result or error with an id")
 	}
 
 	return msg, nil
@@ -262,12 +262,4 @@ func serializeMessage(msg *Message) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unknown message type: %s", msg.Type)
 	}
-}
-
-func keysOf(m map[string]json.RawMessage) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }

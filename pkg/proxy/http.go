@@ -661,7 +661,7 @@ func (h *HTTPProxy) relayJSON(w http.ResponseWriter, r *http.Request, resp *http
 func (h *HTTPProxy) processIncoming(ctx context.Context, data []byte, session string) []byte {
 	msg, err := protocol.ParseMessage(data)
 	if err != nil {
-		h.logger.Warn().Err(err).Msg("the upstream sent something that is not a JSON-RPC message, forwarding it untouched")
+		h.logger.Warn().Int("bytes", len(data)).Msg("the upstream sent something that is not a JSON-RPC message, forwarding it untouched")
 		return data
 	}
 	mctx := &MessageContext{

@@ -1002,3 +1002,19 @@ func BenchmarkHTTPUpstreamDirect(b *testing.B) {
 		_ = resp.Body.Close()
 	}
 }
+
+func TestHTTPProxy_UpstreamTextNeverReachesTheLogs(t *testing.T) {
+	up := newUpstream(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"attacker_chosen_key\":\"payload-text\"}\n\n")
+		_, _ = io.WriteString(w, "data: not json at all payload-text\n\n")
+		_, _ = io.WriteString(w, "data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n\n")
+	})
+	var logs syncBuffer
+	p := startHTTPProxy(t, up.URL, nil, zerolog.New(&logs).Level(zerolog.DebugLevel), nil)
+	body := call(t, http.MethodPost, p.URL(), toolCall, nil).body
+	assert.Contains(t, body, "attacker_chosen_key", "a message the proxy cannot parse is forwarded untouched")
+	assert.Contains(t, logs.String(), "not a JSON-RPC message")
+	assert.NotContains(t, logs.String(), "attacker_chosen_key")
+	assert.NotContains(t, logs.String(), "payload-text")
+}
