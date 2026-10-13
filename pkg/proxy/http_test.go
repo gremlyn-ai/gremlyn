@@ -1119,3 +1119,46 @@ func BenchmarkHTTPProxy_SSERelay(b *testing.B) {
 		_ = resp.Body.Close()
 	}
 }
+
+func TestHTTPProxy_IdleLimitWaitsForTheAgentsAnswer(t *testing.T) {
+	answered := make(chan struct{})
+	up := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"result"`) {
+			close(answered)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"jsonrpc\":\"2.0\",\"id\":\"srv-1\",\"method\":\"elicitation/create\",\"params\":{}}\n\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-answered:
+		case <-r.Context().Done():
+			return
+		}
+		_, _ = io.WriteString(w, "data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"done\":true}}\n\n")
+	})
+	p := startHTTPProxy(t, up.URL, nil, zerolog.Nop(), []proxyOpt{func(c *HTTPConfig) {
+		c.RequestTimeout = 150 * time.Millisecond
+	}})
+
+	resp := openStream(t, http.MethodPost, p.URL(), toolCall, map[string]string{"Mcp-Session-Id": "s1"})
+	defer func() { _ = resp.Body.Close() }()
+	reader := protocol.NewSSEReader(resp.Body, 0)
+	ev, err := reader.Next()
+	require.NoError(t, err)
+	data, _ := ev.Data()
+	require.Contains(t, string(data), "elicitation/create")
+
+	<-time.After(500 * time.Millisecond)
+	reply := call(t, http.MethodPost, p.URL(), `{"jsonrpc":"2.0","id":"srv-1","result":{"action":"accept"}}`,
+		map[string]string{"Mcp-Session-Id": "s1"})
+	assert.Equal(t, http.StatusAccepted, reply.status)
+
+	ev, err = reader.Next()
+	require.NoError(t, err)
+	data, _ = ev.Data()
+	assert.Contains(t, string(data), `"done":true`, "the server waited for the user, not on the network")
+	assert.Equal(t, HTTPStats{}, p.Stats(), "a user taking time to answer is not an upstream timeout")
+}

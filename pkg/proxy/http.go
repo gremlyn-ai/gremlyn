@@ -83,6 +83,7 @@ type HTTPProxy struct {
 	mu         sync.Mutex
 	diagnostic error
 	stats      HTTPStats
+	awaiting   sync.Map
 }
 
 func NewHTTPProxy(cfg HTTPConfig, opts ...Option) (*HTTPProxy, error) {
@@ -423,9 +424,12 @@ func loopbackOrigin(origin string) bool {
 }
 
 type watchdog struct {
-	timer *time.Timer
-	fired atomic.Bool
-	limit time.Duration
+	mu     sync.Mutex
+	timer  *time.Timer
+	fired  atomic.Bool
+	limit  time.Duration
+	armed  bool
+	paused int
 }
 
 func newWatchdog(limit time.Duration, cancel context.CancelFunc) *watchdog {
@@ -438,8 +442,40 @@ func newWatchdog(limit time.Duration, cancel context.CancelFunc) *watchdog {
 	return w
 }
 
-func (w *watchdog) arm()          { w.timer.Reset(w.limit) }
-func (w *watchdog) disarm()       { w.timer.Stop() }
+func (w *watchdog) arm() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.armed = true
+	if w.paused == 0 {
+		w.timer.Reset(w.limit)
+	}
+}
+
+func (w *watchdog) disarm() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.armed = false
+	w.timer.Stop()
+}
+
+func (w *watchdog) pause() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.paused++
+	w.timer.Stop()
+}
+
+func (w *watchdog) resume() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.paused > 0 {
+		w.paused--
+	}
+	if w.paused == 0 && w.armed {
+		w.timer.Reset(w.limit)
+	}
+}
+
 func (w *watchdog) expired() bool { return w.fired.Load() }
 
 func (h *HTTPProxy) handlePost(w http.ResponseWriter, r *http.Request) {
@@ -467,6 +503,12 @@ func (h *HTTPProxy) handlePost(w http.ResponseWriter, r *http.Request) {
 		writeRPCError(w, http.StatusBadRequest, protocol.JSONRPCID{}, -32700,
 			"gremlyn: the body is not a JSON-RPC message: "+err.Error())
 		return
+	}
+
+	if msg.Type == protocol.MessageTypeResponse && msg.Response != nil {
+		if resume, ok := h.awaiting.LoadAndDelete(correlationKey{session: session, id: msg.Response.ID.String()}); ok {
+			resume.(func())()
+		}
 	}
 
 	mctx := &MessageContext{
@@ -761,6 +803,13 @@ func (h *HTTPProxy) relaySSE(w http.ResponseWriter, r *http.Request, resp *http.
 		wantID, waiting = reqMsg.Request.ID.String(), true
 	}
 
+	var awaited []correlationKey
+	defer func() {
+		for _, key := range awaited {
+			h.awaiting.Delete(key)
+		}
+	}()
+
 	reader := protocol.NewSSEReader(resp.Body, h.maxPayload)
 	first := true
 	for {
@@ -786,6 +835,13 @@ func (h *HTTPProxy) relaySSE(w http.ResponseWriter, r *http.Request, resp *http.
 		out, msg := h.processEvent(r.Context(), ev, session)
 		if answers(msg, wantID) {
 			waiting = false
+		}
+		if dog != nil && out != nil && isRequest(msg) {
+			key := correlationKey{session: session, id: msg.Request.ID.String()}
+			var once sync.Once
+			dog.pause()
+			h.awaiting.Store(key, func() { once.Do(dog.resume) })
+			awaited = append(awaited, key)
 		}
 		if out == nil {
 			continue
