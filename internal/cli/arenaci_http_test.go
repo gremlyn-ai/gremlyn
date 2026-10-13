@@ -16,13 +16,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gremlyn-ai/gremlyn/internal/arena/chaos"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-const e2eToken = "s3cr3t-e2e-token-value"
+const e2eTokenEnv = "GREMLYN_E2E_TOKEN"
 
 type fakeHTTPMode int
 
@@ -78,7 +79,7 @@ func (f *fakeHTTPMCP) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Header.Get("Authorization") != "Bearer "+e2eToken {
+	if want := os.Getenv(e2eTokenEnv); want == "" || r.Header.Get("Authorization") != "Bearer "+want {
 		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="https://fake.example/.well-known/oauth-protected-resource"`)
 		w.WriteHeader(http.StatusUnauthorized)
 		return
@@ -157,7 +158,7 @@ func httpCIConfig(agentBin, mode, url string) *CIConfig {
 		MCPServer: MCPServerConfig{
 			Name:    "acme",
 			URL:     url,
-			Headers: map[string]string{"Authorization": "Bearer ${GREMLYN_E2E_TOKEN}"},
+			Headers: map[string]string{"Authorization": "Bearer ${" + e2eTokenEnv + "}"},
 		},
 	}
 }
@@ -169,13 +170,13 @@ func httpScenario(name string, gremlins ...string) ScenarioConfig {
 	}
 }
 
-func isolateRunFiles(t *testing.T) (dataDir, tmpDir string) {
+func isolateRunFiles(t *testing.T) (dataDir, tmpDir, token string) {
 	t.Helper()
-	dataDir, tmpDir = t.TempDir(), t.TempDir()
+	dataDir, tmpDir, token = t.TempDir(), t.TempDir(), "e2e-"+uuid.NewString()
 	t.Setenv("GREMLYN_DATA_DIR", dataDir)
 	t.Setenv("TMPDIR", tmpDir)
-	t.Setenv("GREMLYN_E2E_TOKEN", e2eToken)
-	return dataDir, tmpDir
+	t.Setenv(e2eTokenEnv, token)
+	return dataDir, tmpDir, token
 }
 
 func TestArenaCI_HTTP_ScoreDiscriminatesRobustFromFragile(t *testing.T) {
@@ -227,7 +228,7 @@ func TestArenaCI_HTTP_SecretsNeverReachAFile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles the reference agent and spawns it")
 	}
-	dataDir, tmpDir := isolateRunFiles(t)
+	dataDir, tmpDir, token := isolateRunFiles(t)
 	agentBin := buildRefAgent(t)
 	srv := newFakeHTTPMCP(t, modeSSE)
 
@@ -237,7 +238,7 @@ func TestArenaCI_HTTP_SecretsNeverReachAFile(t *testing.T) {
 		httpCIConfig(agentBin, "robust", srv.URL()), httpScenario("secrets", "injection", "timeout"), true)
 	require.Positive(t, res.Coverage.Injected, "failures: %v", res.Failures)
 
-	assert.Contains(t, srv.authHeaders(), "Bearer "+e2eToken, "the configured header reaches the server")
+	assert.Contains(t, srv.authHeaders(), "Bearer "+token, "the configured header reaches the server")
 
 	outDir := t.TempDir()
 	reportPath := filepath.Join(outDir, "report.json")
@@ -261,15 +262,15 @@ func TestArenaCI_HTTP_SecretsNeverReachAFile(t *testing.T) {
 				return err
 			}
 			scanned = append(scanned, filepath.Base(path))
-			assert.NotContains(t, string(data), e2eToken, "the header value leaked into %s", path)
+			assert.NotContains(t, string(data), token, "the header value leaked into %s", path)
 			return nil
 		}))
 	}
 	for _, want := range []string{"session.json", "events.jsonl", "summary.json", "mcp.json", "report.json", "comment.md"} {
 		assert.Contains(t, scanned, want, "%s must have been written and scanned", want)
 	}
-	assert.NotContains(t, console.String(), e2eToken)
-	assert.NotContains(t, logs.String(), e2eToken)
+	assert.NotContains(t, console.String(), token)
+	assert.NotContains(t, logs.String(), token)
 
 	sessions, err := os.ReadDir(filepath.Join(dataDir, "arena", "sessions"))
 	require.NoError(t, err)
@@ -380,7 +381,7 @@ func postJSON(t *testing.T, url, session, body string) (sessionID, reply string)
 }
 
 func TestWrapCmd_Upstream(t *testing.T) {
-	dataDir, _ := isolateRunFiles(t)
+	dataDir, _, token := isolateRunFiles(t)
 	srv := newFakeHTTPMCP(t, modeJSON)
 	dir := t.TempDir()
 	eventsPath := filepath.Join(dir, "events.jsonl")
@@ -392,7 +393,7 @@ func TestWrapCmd_Upstream(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{
 		"--upstream", srv.URL(),
-		"--upstream-header", "Authorization: Bearer ${GREMLYN_E2E_TOKEN}",
+		"--upstream-header", "Authorization: Bearer ${" + e2eTokenEnv + "}",
 		"--chaos-gremlins", "corruption",
 		"--chaos-intensity", "certain",
 		"--chaos-events", eventsPath,
@@ -440,11 +441,11 @@ func TestWrapCmd_Upstream(t *testing.T) {
 			}
 			data, err := os.ReadFile(path)
 			require.NoError(t, err)
-			assert.NotContains(t, string(data), e2eToken, path)
+			assert.NotContains(t, string(data), token, path)
 			return nil
 		}))
 	}
-	assert.NotContains(t, stderr.String(), e2eToken)
+	assert.NotContains(t, stderr.String(), token)
 }
 
 func TestWrapCmd_UpstreamFlagValidation(t *testing.T) {
