@@ -1162,3 +1162,48 @@ func TestHTTPProxy_IdleLimitWaitsForTheAgentsAnswer(t *testing.T) {
 	assert.Contains(t, string(data), `"done":true`, "the server waited for the user, not on the network")
 	assert.Equal(t, HTTPStats{}, p.Stats(), "a user taking time to answer is not an upstream timeout")
 }
+
+func TestHTTPProxy_StreamFailuresAreCountedWhenNobodyWaits(t *testing.T) {
+	big := strings.Repeat("x", 2048)
+	tests := []struct {
+		name   string
+		method string
+		events string
+		want   string
+	}{
+		{
+			name:   "an oversize event on the GET stream",
+			method: http.MethodGet,
+			events: "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{\"t\":\"" + big + "\"}}\n\n",
+		},
+		{
+			name:   "an oversize event after the POST's response",
+			method: http.MethodPost,
+			events: "data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"ok\":true}}\n\n" +
+				"data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{\"t\":\"" + big + "\"}}\n\n",
+			want: `"ok":true`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			up := newUpstream(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, tt.events)
+			})
+			var logs syncBuffer
+			p := startHTTPProxy(t, up.URL, nil, zerolog.New(&logs), nil, WithMaxPayload(1024))
+			body := ""
+			if tt.method == http.MethodGet {
+				body = call(t, http.MethodGet, p.URL(), "", nil).body
+			} else {
+				body = call(t, http.MethodPost, p.URL(), toolCall, nil).body
+			}
+			if tt.want != "" {
+				assert.Contains(t, body, tt.want)
+			}
+			assert.NotContains(t, body, "gremlyn:", "no request is waiting, so no error is synthesized")
+			assert.Equal(t, 1, p.Stats().Failures)
+			assert.Contains(t, logs.String(), `"level":"warn"`)
+		})
+	}
+}

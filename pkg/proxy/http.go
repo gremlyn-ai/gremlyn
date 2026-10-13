@@ -821,7 +821,7 @@ func (h *HTTPProxy) relaySSE(w http.ResponseWriter, r *http.Request, resp *http.
 			dog.disarm()
 		}
 		if err != nil {
-			h.endSSE(w, rc, r, reqMsg, waiting, err, dog != nil && dog.expired())
+			h.endSSE(resp.Request.Context(), w, rc, reqMsg, waiting, err, dog != nil && dog.expired())
 			return
 		}
 
@@ -835,6 +835,7 @@ func (h *HTTPProxy) relaySSE(w http.ResponseWriter, r *http.Request, resp *http.
 		out, msg := h.processEvent(r.Context(), ev, session)
 		if answers(msg, wantID) {
 			waiting = false
+			dog = nil
 		}
 		if dog != nil && out != nil && isRequest(msg) {
 			key := correlationKey{session: session, id: msg.Request.ID.String()}
@@ -880,17 +881,11 @@ func answers(msg *protocol.Message, wantID string) bool {
 	return msg.Response.ID.String() == wantID
 }
 
-func (h *HTTPProxy) endSSE(w http.ResponseWriter, rc *http.ResponseController, r *http.Request, reqMsg *protocol.Message, waiting bool, err error, timedOut bool) {
+func (h *HTTPProxy) endSSE(upstreamCtx context.Context, w http.ResponseWriter, rc *http.ResponseController, reqMsg *protocol.Message, waiting bool, err error, timedOut bool) {
 	if errors.Is(err, io.EOF) {
 		return
 	}
-	if !timedOut && r.Context().Err() != nil {
-		return
-	}
-	if !waiting {
-		if !timedOut {
-			h.logger.Debug().Err(err).Msg("upstream SSE stream ended")
-		}
+	if !timedOut && upstreamCtx.Err() != nil {
 		return
 	}
 
@@ -902,11 +897,14 @@ func (h *HTTPProxy) endSSE(w http.ResponseWriter, rc *http.ResponseController, r
 		message = fmt.Sprintf("gremlyn: the upstream MCP server did not answer within %s", h.timeout)
 	case errors.Is(err, protocol.ErrSSEEventTooLarge):
 		h.countFailure()
-		h.logger.Warn().Int64("limit", h.maxPayload).Msg("an upstream SSE event is over the size limit")
+		h.logger.Warn().Int64("limit", h.maxPayload).Bool("awaiting_response", waiting).Msg("an upstream SSE event is over the size limit, ending the stream")
 		message = fmt.Sprintf("gremlyn: an upstream event is over the %d byte limit", h.maxPayload)
 	default:
 		h.countFailure()
-		h.logger.Warn().Err(err).Msg("the upstream SSE stream broke")
+		h.logger.Warn().Err(err).Bool("awaiting_response", waiting).Msg("the upstream SSE stream broke")
+	}
+	if !waiting {
+		return
 	}
 
 	data, encErr := protocol.EncodeMessage(rpcError(requestID(reqMsg), UpstreamErrorCode, message))
