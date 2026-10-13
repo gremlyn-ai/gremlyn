@@ -127,6 +127,10 @@ func NewHTTPProxy(cfg HTTPConfig, opts ...Option) (*HTTPProxy, error) {
 func ValidateUpstreamURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
 		return nil, fmt.Errorf("url is not a valid URL: %w", err)
 	}
 	if u.User != nil {
