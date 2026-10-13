@@ -11,7 +11,12 @@ import (
 
 var ErrSSEEventTooLarge = errors.New("SSE event exceeds the size limit")
 
-const sseLineOverhead = 1024
+const (
+	sseLineOverhead      = 1024
+	sseFieldCost         = 64
+	MaxSSEFieldsPerEvent = 4096
+	sseEventSlack        = MaxSSEFieldsPerEvent*sseFieldCost + sseLineOverhead
+)
 
 type SSEField struct {
 	Name  string
@@ -92,7 +97,7 @@ func NewSSEReader(r io.Reader, limit int64) *SSEReader {
 
 func (s *SSEReader) Next() (*SSEEvent, error) {
 	ev := &SSEEvent{}
-	var dataBytes, otherBytes int64
+	var dataBytes, eventBytes int64
 	dataLines := 0
 	for {
 		line, err := readLimitedLine(s.reader, int(s.limit)+sseLineOverhead)
@@ -123,17 +128,19 @@ func (s *SSEReader) Next() (*SSEEvent, error) {
 			return ev, nil
 		}
 
+		if len(ev.Fields) >= MaxSSEFieldsPerEvent {
+			return nil, fmt.Errorf("%w: over %d fields", ErrSSEEventTooLarge, MaxSSEFieldsPerEvent)
+		}
 		field := parseSSEField(line)
+		eventBytes += int64(len(line)) + 1 + sseFieldCost
 		if field.Name == "data" {
 			if dataLines > 0 {
 				dataBytes++
 			}
 			dataLines++
 			dataBytes += int64(len(field.Value))
-		} else {
-			otherBytes += int64(len(line)) + 1
 		}
-		if dataBytes > s.limit || otherBytes > s.limit {
+		if dataBytes > s.limit || eventBytes > s.limit+sseEventSlack {
 			return nil, fmt.Errorf("%w: over %d bytes", ErrSSEEventTooLarge, s.limit)
 		}
 		ev.Fields = append(ev.Fields, field)

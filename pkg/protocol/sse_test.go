@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -98,9 +99,19 @@ func TestSSEReader(t *testing.T) {
 		},
 		{
 			name:    "a comment flood is bounded too",
-			stream:  strings.Repeat(":\n", 4096) + "\n",
-			limit:   1024,
+			stream:  strings.Repeat(":\n", MaxSSEFieldsPerEvent+1) + "\n",
+			limit:   1 << 20,
 			wantErr: ErrSSEEventTooLarge,
+		},
+		{
+			name:    "bare data lines count against the event budget",
+			stream:  strings.Repeat("data\n", 1<<20) + "\n",
+			wantErr: ErrSSEEventTooLarge,
+		},
+		{
+			name:     "fields up to the per-event cap pass",
+			stream:   strings.Repeat("data\n", MaxSSEFieldsPerEvent) + "\n",
+			wantData: []string{strings.Repeat("\n", MaxSSEFieldsPerEvent-1)},
 		},
 		{
 			name:    "one line far over the limit is refused without reading it whole",
@@ -220,4 +231,16 @@ func TestEncodeMessage_PreservesID(t *testing.T) {
 	out, err := EncodeMessage(msg)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"jsonrpc":"2.0","id":"abc","result":{"ok":true}}`, string(out))
+}
+
+func TestSSEReader_BareFieldFloodStaysSmall(t *testing.T) {
+	stream := strings.Repeat("data\n", 4<<20) + "\n"
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err := NewSSEReader(strings.NewReader(stream), 0).Next()
+	runtime.ReadMemStats(&after)
+	require.ErrorIs(t, err, ErrSSEEventTooLarge)
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(8<<20),
+		"a flood of empty fields must be refused before it is held in memory")
 }
