@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,9 @@ import (
 )
 
 const httpDrainGrace = 10 * time.Second
+
+var errUpstreamUnreliable = errors.New(
+	"the MCP server timed out or failed outside any gremlin, so the session's score cannot be attributed")
 
 type chaosSetup struct {
 	Gremlins      []string
@@ -113,7 +117,7 @@ func (r *chaosRun) finish(ctx context.Context, runErr error, ended bool, upstrea
 	}
 
 	if r.session != nil {
-		r.session.finish(ctx, runErr)
+		r.session.finish(ctx, runErr, upstream)
 	}
 }
 
@@ -186,7 +190,11 @@ func (h *httpChaos) stop(ctx context.Context) error {
 	}
 	diagnostic := h.proxy.Diagnostic()
 	stats := h.proxy.Stats()
-	h.run.finish(ctx, diagnostic, diagnostic == nil, chaos.UpstreamStats{Timeouts: stats.Timeouts, Failures: stats.Failures})
+	runErr := diagnostic
+	if runErr == nil && stats.Timeouts+stats.Failures > 0 {
+		runErr = fmt.Errorf("%w: %d timeout(s), %d failure(s)", errUpstreamUnreliable, stats.Timeouts, stats.Failures)
+	}
+	h.run.finish(ctx, runErr, diagnostic == nil, chaos.UpstreamStats{Timeouts: stats.Timeouts, Failures: stats.Failures})
 	h.run.close()
-	return diagnostic
+	return runErr
 }

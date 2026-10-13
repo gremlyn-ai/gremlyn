@@ -300,7 +300,7 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	}
 	if err != nil {
 		if upstream != nil {
-			if diag := upstream.stop(ctx); diag != nil {
+			if diag := upstream.stop(ctx); diag != nil && !errors.Is(diag, errUpstreamUnreliable) {
 				res.Failures = append(res.Failures, "the MCP server could not be proxied: "+diag.Error())
 			}
 		}
@@ -332,7 +332,7 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	}
 
 	if upstream != nil {
-		if diag := upstream.stop(ctx); diag != nil {
+		if diag := upstream.stop(ctx); diag != nil && !errors.Is(diag, errUpstreamUnreliable) {
 			res.Failures = append(res.Failures, "the MCP server could not be proxied: "+diag.Error())
 		}
 	}

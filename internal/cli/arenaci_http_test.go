@@ -525,3 +525,46 @@ func TestWrapCmd_UpstreamThatCannotListenFailsTheSession(t *testing.T) {
 	require.Error(t, cmd.Execute())
 	assert.Equal(t, "failed", readOnlySession(t, dataDir)["status"], "a run that never started is not left running")
 }
+
+func TestWrapCmd_UnreliableUpstreamFailsTheSession(t *testing.T) {
+	dataDir, _, _ := isolateRunFiles(t)
+	srv := newFakeHTTPMCP(t, modeHang)
+
+	cmd := NewWrapCmd(zerolog.Nop())
+	stderr := &lockedBuffer{}
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{
+		"--upstream", srv.URL(),
+		"--upstream-header", "Authorization: Bearer ${" + e2eTokenEnv + "}",
+		"--upstream-timeout", "200ms",
+		"--chaos-gremlins", "corruption",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- cmd.ExecuteContext(ctx) }()
+
+	var local string
+	require.Eventually(t, func() bool {
+		out := stderr.String()
+		if i := strings.Index(out, " at http://"); i >= 0 {
+			local = strings.TrimSpace(out[i+4:])
+			return true
+		}
+		return false
+	}, 10*time.Second, 10*time.Millisecond)
+
+	session, _ := postJSON(t, local, "", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	_, body := postJSON(t, local, session, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_graph","arguments":{}}}`)
+	require.Contains(t, body, "did not answer within 200ms")
+
+	cancel()
+	err := <-done
+	require.Error(t, err, "wrap exits non-zero when the upstream itself failed")
+	assert.ErrorIs(t, err, errUpstreamUnreliable)
+
+	recorded := readOnlySession(t, dataDir)
+	assert.Equal(t, "failed", recorded["status"])
+	assert.EqualValues(t, 1, recorded["upstream_timeouts"])
+}

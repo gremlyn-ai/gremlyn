@@ -198,10 +198,16 @@ func runUpstreamWrap(cmd *cobra.Command, logger zerolog.Logger, target upstreamT
 
 	<-ctx.Done()
 	logger.Info().Msg("shutting down the http proxy")
-	if diag := h.stop(ctx); diag != nil {
-		return fmt.Errorf("the MCP server could not be proxied: %w", diag)
+	err = h.stop(ctx)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, errUpstreamUnreliable):
+		logger.Warn().Err(err).Msg("the session is recorded as failed")
+		return err
+	default:
+		return fmt.Errorf("the MCP server could not be proxied: %w", err)
 	}
-	return nil
 }
 
 func sessionEndedNormally(runErr, ctxErr error, signaled bool) bool {

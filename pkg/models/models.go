@@ -69,6 +69,8 @@ type ArenaSession struct {
 	GremlinsSent     int             `json:"gremlins_sent"`
 	GremlinsSurvived int             `json:"gremlins_survived"`
 	GremlinsCrashed  int             `json:"gremlins_crashed"`
+	UpstreamTimeouts int             `json:"upstream_timeouts,omitempty"`
+	UpstreamFailures int             `json:"upstream_failures,omitempty"`
 	StartedAt        time.Time       `json:"started_at"`
 	CompletedAt      *time.Time      `json:"completed_at,omitempty"`
 }

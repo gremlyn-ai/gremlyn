@@ -72,7 +72,7 @@ func (r *chaosSessionRecorder) RecordEvent(ctx context.Context, e models.ArenaEv
 	return r.store.InsertEvent(ctx, e)
 }
 
-func (r *chaosSessionRecorder) finish(ctx context.Context, runErr error) {
+func (r *chaosSessionRecorder) finish(ctx context.Context, runErr error, upstream chaos.UpstreamStats) {
 	events, err := r.store.ListBySession(ctx, r.id)
 	if err != nil {
 		r.logger.Warn().Err(err).Str("session_id", r.id).Msg("reading events to finalize session")
@@ -114,6 +114,8 @@ func (r *chaosSessionRecorder) finish(ctx context.Context, runErr error) {
 	sess.GremlinsSent = sent
 	sess.GremlinsSurvived = survived
 	sess.GremlinsCrashed = crashed
+	sess.UpstreamTimeouts = upstream.Timeouts
+	sess.UpstreamFailures = upstream.Failures
 	sess.CompletedAt = &now
 
 	if err := r.store.UpdateSession(ctx, sess); err != nil {

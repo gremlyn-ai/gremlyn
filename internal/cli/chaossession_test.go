@@ -38,7 +38,7 @@ func TestChaosSessionRecorder_RecordsCompletedScoredSession(t *testing.T) {
 		ID: "e2", GremlinType: "timeout", Outcome: models.OutcomeCrashed, Score: 10,
 	}))
 
-	rec.finish(ctx, nil)
+	rec.finish(ctx, nil, chaos.UpstreamStats{})
 
 	store := readBackStore(t, dataDir)
 	sessions, err := store.ListSessions(ctx)
@@ -70,13 +70,15 @@ func TestChaosSessionRecorder_FailedRun(t *testing.T) {
 	}, zerolog.Nop())
 	require.NotNil(t, rec)
 
-	rec.finish(ctx, assert.AnError)
+	rec.finish(ctx, assert.AnError, chaos.UpstreamStats{Timeouts: 2, Failures: 1})
 
 	store := readBackStore(t, dataDir)
 	sessions, err := store.ListSessions(ctx)
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 	assert.Equal(t, models.SessionStatusFailed, sessions[0].Status)
+	assert.Equal(t, 2, sessions[0].UpstreamTimeouts, "upstream trouble is kept in the run history")
+	assert.Equal(t, 1, sessions[0].UpstreamFailures)
 }
 
 func TestCombineEventSinks_FansOut(t *testing.T) {
