@@ -112,9 +112,11 @@ stdio server that answers out of order.
 `internal/cli/chaossession.go` writes each run as `running`, then `completed` when the agent
 ended the session, by closing stdin or with SIGTERM, or `failed` when the proxy itself
 errored. Over HTTP the session ends when `arena ci`'s agent exits or `wrap --upstream` is
-stopped, and it is `failed` when the proxy left a diagnostic: a legacy server, a refused
-credential, a redirect. The record names an HTTP server by its URL without the query; header
-values are never recorded. Events are appended to `events.jsonl` and synced one by one, so a proxy killed
+stopped. It is `failed` when the proxy left a diagnostic (a legacy server, a refused
+credential, a redirect) or when the upstream itself timed out or failed outside any gremlin;
+those counts are kept on the record as `upstream_timeouts` and `upstream_failures`. The record
+names an HTTP server by its scheme and host only; header values are never recorded. Events
+are appended to `events.jsonl` and synced one by one, so a proxy killed
 outright keeps every observation it made; its record just stays `running`.
 
 History lives under `~/.gremlyn/arena/sessions/`, one directory per run with `session.json`
