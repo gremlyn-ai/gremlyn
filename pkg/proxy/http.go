@@ -109,7 +109,10 @@ func NewHTTPProxy(cfg HTTPConfig, opts ...Option) (*HTTPProxy, error) {
 		seen[canonical] = true
 	}
 	timeout := cfg.RequestTimeout
-	if timeout <= 0 {
+	if timeout < 0 {
+		return nil, fmt.Errorf("request timeout must be positive, got %s", timeout)
+	}
+	if timeout == 0 {
 		timeout = DefaultRequestTimeout
 	}
 

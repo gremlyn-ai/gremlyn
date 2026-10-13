@@ -479,6 +479,8 @@ func TestWrapCmd_UpstreamFlagValidation(t *testing.T) {
 		{"a non-loopback listen address", []string{"--upstream", "https://mcp.example.com/mcp", "--listen", "0.0.0.0:0"}, "not a loopback address"},
 		{"a missing variable", []string{"--upstream", "https://mcp.example.com/mcp", "--upstream-header", "Authorization: ${GREMLYN_NOPE}"}, "GREMLYN_NOPE is not set"},
 		{"a malformed header", []string{"--upstream", "https://mcp.example.com/mcp", "--upstream-header", "nocolon"}, "Name: value"},
+		{"a zero timeout", []string{"--upstream", "https://mcp.example.com/mcp", "--upstream-timeout", "0s"}, "must be positive"},
+		{"a negative timeout", []string{"--upstream", "https://mcp.example.com/mcp", "--upstream-timeout=-1s"}, "must be positive"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

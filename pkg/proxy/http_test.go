@@ -973,6 +973,8 @@ func TestNewHTTPProxy_RefusesReservedHeaders(t *testing.T) {
 	assert.Error(t, err, "two spellings of one header would make the value sent random")
 	_, err = NewHTTPProxy(HTTPConfig{URL: "https://mcp.example.com", ListenAddr: "0.0.0.0:0"})
 	assert.Error(t, err)
+	_, err = NewHTTPProxy(HTTPConfig{URL: "https://mcp.example.com", RequestTimeout: -time.Second})
+	assert.Error(t, err, "a negative timeout is refused, not replaced by the default")
 }
 
 func TestRedactURL(t *testing.T) {

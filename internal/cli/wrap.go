@@ -68,6 +68,9 @@ environment, so a token can stay out of the command line: single-quote the flag.
 				if len(args) > 0 {
 					return errors.New("--upstream fronts an HTTP server: drop the command after '--'")
 				}
+				if upstreamTimeout <= 0 {
+					return fmt.Errorf("--upstream-timeout must be positive, got %s", upstreamTimeout)
+				}
 				headers, err := parseHeaderFlags(upstreamHeaders)
 				if err != nil {
 					return err
