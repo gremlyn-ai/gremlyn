@@ -890,12 +890,22 @@ func TestHTTPProxy_ShutdownDrainsInFlightExchanges(t *testing.T) {
 		defer cancel()
 		stopped <- p.Shutdown(ctx)
 	}()
+	addr := strings.TrimPrefix(origin(p), "http://")
+	require.Eventually(t, func() bool {
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			return true
+		}
+		_ = conn.Close()
+		return false
+	}, 5*time.Second, 10*time.Millisecond, "shutdown has begun: the listener refuses new connections")
 	close(hold)
 
 	assert.Contains(t, <-answer, `"drained":true`, "a response in flight at shutdown still reaches the agent")
 	require.NoError(t, <-stopped)
 	_, err = io.ReadAll(stream.Body)
 	assert.NoError(t, err, "the GET stream ends cleanly at shutdown")
+	assert.Equal(t, HTTPStats{}, p.Stats(), "closing streams at shutdown is not an upstream failure")
 }
 
 func TestValidateUpstreamURL(t *testing.T) {
