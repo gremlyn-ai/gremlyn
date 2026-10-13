@@ -1248,3 +1248,17 @@ func TestHTTPProxy_ErrorStatusesFromTheUpstream(t *testing.T) {
 		})
 	}
 }
+
+type failingWriter struct{ header http.Header }
+
+func (f *failingWriter) Header() http.Header       { return f.header }
+func (f *failingWriter) WriteHeader(int)           {}
+func (f *failingWriter) Write([]byte) (int, error) { return 0, errors.New("agent went away") }
+
+func TestHTTPProxy_WriteErrorsAreLogged(t *testing.T) {
+	var logs syncBuffer
+	p, err := NewHTTPProxy(HTTPConfig{URL: "https://mcp.example.com"}, WithLogger(zerolog.New(&logs).Level(zerolog.DebugLevel)))
+	require.NoError(t, err)
+	p.writeRPCError(&failingWriter{header: http.Header{}}, http.StatusBadGateway, protocol.NewIntID(1), UpstreamErrorCode, "x")
+	assert.Contains(t, logs.String(), "agent went away")
+}

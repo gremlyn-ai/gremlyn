@@ -485,7 +485,7 @@ func (h *HTTPProxy) handlePost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeRPCError(w, http.StatusRequestEntityTooLarge, protocol.JSONRPCID{}, -32600,
+			h.writeRPCError(w, http.StatusRequestEntityTooLarge, protocol.JSONRPCID{}, -32600,
 				fmt.Sprintf("gremlyn: the message is over the %d byte limit", h.maxPayload))
 			return
 		}
@@ -494,13 +494,13 @@ func (h *HTTPProxy) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if protocol.IsBatch(body) {
-		writeRPCError(w, http.StatusBadRequest, protocol.JSONRPCID{}, -32600, "gremlyn: "+protocol.ErrBatch.Error())
+		h.writeRPCError(w, http.StatusBadRequest, protocol.JSONRPCID{}, -32600, "gremlyn: "+protocol.ErrBatch.Error())
 		return
 	}
 
 	msg, err := protocol.ParseMessage(body)
 	if err != nil {
-		writeRPCError(w, http.StatusBadRequest, protocol.JSONRPCID{}, -32700,
+		h.writeRPCError(w, http.StatusBadRequest, protocol.JSONRPCID{}, -32700,
 			"gremlyn: the body is not a JSON-RPC message: "+err.Error())
 		return
 	}
@@ -525,17 +525,17 @@ func (h *HTTPProxy) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 	if decision.Action == DecisionBlock {
 		if id, ok := msg.GetID(); ok {
-			writeMessage(w, http.StatusOK, NewBlockErrorResponse(id, decision.Reason))
+			h.writeMessage(w, http.StatusOK, NewBlockErrorResponse(id, decision.Reason))
 			return
 		}
-		writeRPCError(w, http.StatusBadRequest, protocol.JSONRPCID{}, -32600, "Blocked by Gremlyn: "+decision.Reason)
+		h.writeRPCError(w, http.StatusBadRequest, protocol.JSONRPCID{}, -32600, "Blocked by Gremlyn: "+decision.Reason)
 		return
 	}
 
 	payload, err := wireBytes(msg, processed)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("encoding the outgoing message")
-		writeRPCError(w, http.StatusInternalServerError, requestID(msg), UpstreamErrorCode, "gremlyn: "+err.Error())
+		h.writeRPCError(w, http.StatusInternalServerError, requestID(msg), UpstreamErrorCode, "gremlyn: "+err.Error())
 		return
 	}
 
@@ -556,7 +556,7 @@ func (h *HTTPProxy) handlePost(w http.ResponseWriter, r *http.Request) {
 	if h.legacyUpstream(r.Context(), msg, resp, session) {
 		h.setDiagnostic(ErrLegacyTransport)
 		h.logger.Error().Str("upstream", RedactURL(h.upstream)).Msg(ErrLegacyTransport.Error())
-		writeRPCError(w, http.StatusBadGateway, requestID(msg), UpstreamErrorCode, "gremlyn: "+ErrLegacyTransport.Error())
+		h.writeRPCError(w, http.StatusBadGateway, requestID(msg), UpstreamErrorCode, "gremlyn: "+ErrLegacyTransport.Error())
 		return
 	}
 
@@ -650,13 +650,13 @@ func (h *HTTPProxy) upstreamFailed(w http.ResponseWriter, r *http.Request, msg *
 			Dur("request_timeout", h.timeout).
 			Str("method", methodOf(msg)).
 			Msg("the upstream did not answer in time")
-		writeRPCError(w, http.StatusGatewayTimeout, requestID(msg), UpstreamErrorCode,
+		h.writeRPCError(w, http.StatusGatewayTimeout, requestID(msg), UpstreamErrorCode,
 			fmt.Sprintf("gremlyn: the upstream MCP server did not answer within %s", h.timeout))
 		return
 	}
 	h.countFailure()
 	h.logger.Warn().Err(err).Msg("forwarding to the upstream failed")
-	writeRPCError(w, http.StatusBadGateway, requestID(msg), UpstreamErrorCode,
+	h.writeRPCError(w, http.StatusBadGateway, requestID(msg), UpstreamErrorCode,
 		"gremlyn: the upstream MCP server could not be reached")
 }
 
@@ -701,7 +701,7 @@ func (h *HTTPProxy) relayResponse(w http.ResponseWriter, r *http.Request, resp *
 	case resp.StatusCode >= 300 && resp.StatusCode < 400:
 		h.setDiagnostic(ErrUpstreamRedirect)
 		h.logger.Error().Int("status", resp.StatusCode).Msg(ErrUpstreamRedirect.Error())
-		writeRPCError(w, http.StatusBadGateway, requestID(reqMsg), UpstreamErrorCode, "gremlyn: "+ErrUpstreamRedirect.Error())
+		h.writeRPCError(w, http.StatusBadGateway, requestID(reqMsg), UpstreamErrorCode, "gremlyn: "+ErrUpstreamRedirect.Error())
 		return
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
 		if resp.StatusCode >= 500 || (resp.StatusCode == http.StatusNotFound && session != "") {
@@ -740,7 +740,7 @@ func (h *HTTPProxy) relayJSON(w http.ResponseWriter, r *http.Request, resp *http
 	if int64(len(body)) > h.maxPayload {
 		h.countFailure()
 		h.logger.Warn().Int64("limit", h.maxPayload).Msg("the upstream response is over the size limit")
-		writeRPCError(w, http.StatusBadGateway, requestID(reqMsg), UpstreamErrorCode,
+		h.writeRPCError(w, http.StatusBadGateway, requestID(reqMsg), UpstreamErrorCode,
 			fmt.Sprintf("gremlyn: the upstream response is over the %d byte limit", h.maxPayload))
 		return
 	}
@@ -919,8 +919,12 @@ func (h *HTTPProxy) endSSE(upstreamCtx context.Context, w http.ResponseWriter, r
 		return
 	}
 	ev := &protocol.SSEEvent{Fields: []protocol.SSEField{{Name: "event", Value: "message"}, {Name: "data", Value: string(data)}}}
-	if werr := protocol.WriteSSEEvent(w, ev); werr == nil {
-		_ = rc.Flush()
+	if werr := protocol.WriteSSEEvent(w, ev); werr != nil {
+		h.logger.Debug().Err(werr).Msg("writing the synthesized error event to the agent")
+		return
+	}
+	if ferr := rc.Flush(); ferr != nil {
+		h.logger.Debug().Err(ferr).Msg("flushing the synthesized error event to the agent")
 	}
 }
 
@@ -1006,11 +1010,11 @@ func rpcError(id protocol.JSONRPCID, code int, message string) *protocol.Message
 	}
 }
 
-func writeRPCError(w http.ResponseWriter, status int, id protocol.JSONRPCID, code int, message string) {
-	writeMessage(w, status, rpcError(id, code, message))
+func (h *HTTPProxy) writeRPCError(w http.ResponseWriter, status int, id protocol.JSONRPCID, code int, message string) {
+	h.writeMessage(w, status, rpcError(id, code, message))
 }
 
-func writeMessage(w http.ResponseWriter, status int, msg *protocol.Message) {
+func (h *HTTPProxy) writeMessage(w http.ResponseWriter, status int, msg *protocol.Message) {
 	data, err := protocol.EncodeMessage(msg)
 	if err != nil {
 		data = []byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"gremlyn: encoding failed"}}`)
@@ -1018,5 +1022,7 @@ func writeMessage(w http.ResponseWriter, status int, msg *protocol.Message) {
 	w.Header().Set("Content-Type", contentTypeJSON)
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.WriteHeader(status)
-	_, _ = w.Write(data)
+	if _, err := w.Write(data); err != nil {
+		h.logger.Debug().Err(err).Msg("writing an error response to the agent")
+	}
 }
