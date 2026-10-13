@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1051,4 +1052,40 @@ func TestHTTPProxy_SecretPath(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, call(t, http.MethodPost, first.URL(), toolCall, nil).status)
 	assert.NotContains(t, logs.String(), strings.TrimPrefix(first.URL(), origin(first)+"/mcp/"), "the secret path is never logged")
+}
+
+func TestLoopbackOnlyControl(t *testing.T) {
+	tests := []struct {
+		address string
+		ok      bool
+	}{
+		{"127.0.0.1:80", true},
+		{"127.0.0.2:80", true},
+		{"[::1]:80", true},
+		{"10.0.0.1:80", false},
+		{"93.184.216.34:443", false},
+		{"[2001:db8::1]:80", false},
+		{"no-port", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.address, func(t *testing.T) {
+			assert.Equal(t, tt.ok, loopbackOnlyControl("tcp", tt.address, nil) == nil)
+		})
+	}
+}
+
+func TestRequireLoopbackAddr(t *testing.T) {
+	assert.NoError(t, requireLoopbackAddr(&net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}))
+	assert.NoError(t, requireLoopbackAddr(&net.TCPAddr{IP: net.IPv6loopback, Port: 1}))
+	assert.Error(t, requireLoopbackAddr(&net.TCPAddr{IP: net.IPv4(192, 168, 1, 2), Port: 1}),
+		"a localhost that resolves off the machine must not be served")
+	assert.Error(t, requireLoopbackAddr(&net.UnixAddr{Name: "/tmp/x", Net: "unix"}))
+}
+
+func TestHTTPProxy_PlainHTTPToLocalhostByName(t *testing.T) {
+	up := newUpstream(t, jsonUpstream(t, `{"ok":true}`))
+	u, err := url.Parse(up.URL)
+	require.NoError(t, err)
+	p := startHTTPProxy(t, "http://localhost:"+u.Port(), nil, zerolog.Nop(), nil)
+	assert.Contains(t, call(t, http.MethodPost, p.URL(), toolCall, nil).body, `"ok"`)
 }

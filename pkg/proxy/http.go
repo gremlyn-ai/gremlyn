@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/models"
@@ -112,6 +113,11 @@ func NewHTTPProxy(cfg HTTPConfig, opts ...Option) (*HTTPProxy, error) {
 
 	o := applyOptions(opts)
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if upstream.Scheme == "http" {
+		dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, Control: loopbackOnlyControl}
+		transport.DialContext = dialer.DialContext
+		transport.Proxy = nil
+	}
 
 	h := &HTTPProxy{
 		cfg:        cfg,
@@ -181,6 +187,25 @@ func RedactURL(u *url.URL) string {
 		return ""
 	}
 	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
+}
+
+func requireLoopbackAddr(addr net.Addr) error {
+	tcp, ok := addr.(*net.TCPAddr)
+	if !ok || !tcp.IP.IsLoopback() {
+		return fmt.Errorf("the proxy bound %s, which is not a loopback address", addr)
+	}
+	return nil
+}
+
+func loopbackOnlyControl(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("plain http upstream address %q: %w", address, err)
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("a plain http upstream resolved to %s, which is not a loopback address", host)
+	}
+	return nil
 }
 
 func isLoopbackHost(host string) bool {
@@ -255,6 +280,10 @@ func (h *HTTPProxy) Start(ctx context.Context) error {
 	ln, err := lc.Listen(ctx, "tcp", h.cfg.ListenAddr)
 	if err != nil {
 		return fmt.Errorf("listening on %s: %w", h.cfg.ListenAddr, err)
+	}
+	if err := requireLoopbackAddr(ln.Addr()); err != nil {
+		_ = ln.Close()
+		return err
 	}
 	h.listener = ln
 	h.server = &http.Server{
