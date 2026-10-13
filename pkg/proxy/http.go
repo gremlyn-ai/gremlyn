@@ -97,10 +97,16 @@ func NewHTTPProxy(cfg HTTPConfig, opts ...Option) (*HTTPProxy, error) {
 	if err := ValidateListenAddr(cfg.ListenAddr); err != nil {
 		return nil, err
 	}
+	seen := make(map[string]bool, len(cfg.Headers))
 	for name := range cfg.Headers {
 		if ReservedUpstreamHeader(name) {
 			return nil, fmt.Errorf("header %q is managed by the proxy and cannot be configured", name)
 		}
+		canonical := http.CanonicalHeaderKey(name)
+		if seen[canonical] {
+			return nil, fmt.Errorf("header %q is configured twice: names are case-insensitive", canonical)
+		}
+		seen[canonical] = true
 	}
 	timeout := cfg.RequestTimeout
 	if timeout <= 0 {

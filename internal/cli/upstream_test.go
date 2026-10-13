@@ -37,6 +37,7 @@ func TestResolveHeaders(t *testing.T) {
 		{"an invalid reference", map[string]string{"X-Key": "${1BAD}"}, nil, "invalid variable reference"},
 		{"a line break smuggled through a variable", map[string]string{"X-Key": "${NL}"}, nil, "line break"},
 		{"an invalid name", map[string]string{"Bad Name": "x"}, nil, "not a valid HTTP header name"},
+		{"one header under two spellings", map[string]string{"Authorization": "a", "authorization": "b"}, nil, "the same header"},
 		{"the GitHub CLI token", map[string]string{"Authorization": "Bearer ${GH_TOKEN}"}, nil, "CI credential variable"},
 		{"the workflow token", map[string]string{"Authorization": "Bearer ${GITHUB_TOKEN}"}, nil, "CI credential variable"},
 		{"the OIDC request token", map[string]string{"X-Key": "${ACTIONS_ID_TOKEN_REQUEST_TOKEN}"}, nil, "CI credential variable"},
@@ -62,7 +63,11 @@ func TestParseHeaderFlags(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"Authorization": "Bearer ${TOKEN}", "X-A": "b"}, got)
 
-	for _, bad := range [][]string{{"no-colon"}, {": value"}, {"X-A: 1", "X-A: 2"}} {
+	lower, err := parseHeaderFlags([]string{"x-tenant: acme"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"X-Tenant": "acme"}, lower)
+
+	for _, bad := range [][]string{{"no-colon"}, {": value"}, {"X-A: 1", "X-A: 2"}, {"Authorization: a", "authorization: b"}} {
 		_, err := parseHeaderFlags(bad)
 		assert.Error(t, err, "%v", bad)
 	}

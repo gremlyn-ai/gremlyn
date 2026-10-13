@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 
@@ -64,10 +65,16 @@ func resolveHeaders(raw map[string]string, lookup envLookup, used map[string]boo
 	sort.Strings(names)
 
 	out := make(map[string]string, len(raw))
+	seen := make(map[string]string, len(raw))
 	for _, name := range names {
 		if !validHeaderName(name) {
 			return nil, fmt.Errorf("header %q is not a valid HTTP header name", name)
 		}
+		canonical := http.CanonicalHeaderKey(name)
+		if other, dup := seen[canonical]; dup {
+			return nil, fmt.Errorf("headers %q and %q are the same header: names are case-insensitive", other, name)
+		}
+		seen[canonical] = name
 		if proxy.ReservedUpstreamHeader(name) {
 			return nil, fmt.Errorf("header %q is managed by the proxy and cannot be set", name)
 		}
@@ -180,10 +187,11 @@ func parseHeaderFlags(flags []string) (map[string]string, error) {
 		if !ok || name == "" {
 			return nil, errors.New(`--upstream-header must be "Name: value"`)
 		}
-		if _, dup := out[name]; dup {
-			return nil, fmt.Errorf("--upstream-header %q is given more than once", name)
+		canonical := http.CanonicalHeaderKey(name)
+		if _, dup := out[canonical]; dup {
+			return nil, fmt.Errorf("--upstream-header %q is given more than once (names are case-insensitive)", name)
 		}
-		out[name] = strings.TrimSpace(value)
+		out[canonical] = strings.TrimSpace(value)
 	}
 	return out, nil
 }

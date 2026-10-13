@@ -969,6 +969,8 @@ func TestNewHTTPProxy_RefusesReservedHeaders(t *testing.T) {
 	}
 	_, err := NewHTTPProxy(HTTPConfig{URL: "https://mcp.example.com", Headers: map[string]string{"Authorization": "x"}})
 	assert.NoError(t, err)
+	_, err = NewHTTPProxy(HTTPConfig{URL: "https://mcp.example.com", Headers: map[string]string{"Authorization": "a", "authorization": "b"}})
+	assert.Error(t, err, "two spellings of one header would make the value sent random")
 	_, err = NewHTTPProxy(HTTPConfig{URL: "https://mcp.example.com", ListenAddr: "0.0.0.0:0"})
 	assert.Error(t, err)
 }
