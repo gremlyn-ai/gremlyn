@@ -146,7 +146,7 @@ runs:
         REPORT: ${{ inputs.report }}
         MIN_SCORE: ${{ inputs.min-score }}
         BASELINE: ${{ inputs.baseline }}
-        GH_TOKEN: ${{ inputs.github-token }}
+        GREMLYN_GH_TOKEN: ${{ inputs.github-token }}
       run: |
         set -uo pipefail
 
@@ -172,7 +172,8 @@ runs:
         fi
 
         set +e
-        gremlyn arena ci --config "$CONFIG" --format text --out "$REPORT"
+        env -u GREMLYN_GH_TOKEN -u GH_TOKEN -u GITHUB_TOKEN \
+          gremlyn arena ci --config "$CONFIG" --format text --out "$REPORT"
         status=$?
         set -e
 
@@ -185,9 +186,9 @@ runs:
 
         if [ -z "$BASELINE" ] && [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && command -v gh >/dev/null 2>&1; then
           wf=$(basename "${GITHUB_WORKFLOW_REF%%@*}")
-          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$wf" --branch "$GITHUB_BASE_REF" \
+          run_id=$(GH_TOKEN="$GREMLYN_GH_TOKEN" gh run list --repo "$GITHUB_REPOSITORY" --workflow "$wf" --branch "$GITHUB_BASE_REF" \
                      --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
-          if [ -n "$run_id" ] && gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+          if [ -n "$run_id" ] && GH_TOKEN="$GREMLYN_GH_TOKEN" gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
                -n gremlyn-report -D "$RUNNER_TEMP/gremlyn-baseline" >/dev/null 2>&1; then
             BASELINE="$RUNNER_TEMP/gremlyn-baseline/$(basename "$REPORT")"
             echo "baseline: run $run_id on $GITHUB_BASE_REF"
