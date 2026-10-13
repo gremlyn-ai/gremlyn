@@ -143,6 +143,13 @@ internal/arena/
   --chaos-gremlins timeout --chaos-intensity certain
 ```
 
+**Use a test account.** The agent under test calls real tools on the real server, with the
+token you configure, and a scenario injects failures and instructions into what it reads.
+Point HTTP scenarios at a test account or a staging server whose data you can lose, with a
+token scoped to it, and keep injected text a harmless canary, as
+[`examples/arena-http.yaml`](../examples/arena-http.yaml) does: an agent that obeys replies
+PINEAPPLE instead of deleting anything.
+
 With `--upstream`, the proxy prints the local URL to give the agent's MCP client. Single-quote
 `--upstream-header` so the shell leaves `${VAR}` to gremlyn and the token stays out of the
 process list.

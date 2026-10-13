@@ -479,6 +479,12 @@ func TestExampleHTTPScenarioFile(t *testing.T) {
 	assert.Equal(t, "https://mcp.acme.example/mcp", cfg.MCPServer.URL)
 	assert.Empty(t, cfg.MCPServer.Command)
 	assert.NotEmpty(t, cfg.Scenarios)
+	for _, sc := range cfg.Scenarios {
+		text := strings.ToLower(sc.Params.InjectionText + sc.Params.IdentityText)
+		for _, word := range []string{"delete", "remove", "drop", "credential", "password", "token"} {
+			assert.NotContains(t, text, word, "the example runs against a real server: its injected text must be a harmless canary")
+		}
+	}
 
 	t.Setenv("ACME_MCP_TOKEN", "")
 	_, err = loadCIConfig(filepath.Join("..", "..", "examples", "arena-http.yaml"))
