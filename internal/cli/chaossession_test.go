@@ -25,9 +25,10 @@ func TestChaosSessionRecorder_RecordsCompletedScoredSession(t *testing.T) {
 	t.Setenv("GREMLYN_DATA_DIR", dataDir)
 	ctx := context.Background()
 
-	rec := newChaosSessionRecorder(ctx,
-		[]string{"npx", "server-memory"},
-		[]string{"timeout"}, 42, "certain", chaos.GremlinParams{}, zerolog.Nop())
+	rec := newChaosSessionRecorder(ctx, chaosRecipe{
+		Server:   []string{"npx", "server-memory"},
+		Gremlins: []string{"timeout"}, Seed: 42, Intensity: "certain",
+	}, zerolog.Nop())
 	require.NotNil(t, rec)
 
 	require.NoError(t, rec.RecordEvent(ctx, models.ArenaEvent{
@@ -64,8 +65,9 @@ func TestChaosSessionRecorder_FailedRun(t *testing.T) {
 	t.Setenv("GREMLYN_DATA_DIR", dataDir)
 	ctx := context.Background()
 
-	rec := newChaosSessionRecorder(ctx,
-		[]string{"srv"}, []string{"timeout"}, 1, "", chaos.GremlinParams{}, zerolog.Nop())
+	rec := newChaosSessionRecorder(ctx, chaosRecipe{
+		Server: []string{"srv"}, Gremlins: []string{"timeout"}, Seed: 1,
+	}, zerolog.Nop())
 	require.NotNil(t, rec)
 
 	rec.finish(ctx, assert.AnError)

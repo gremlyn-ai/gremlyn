@@ -30,15 +30,7 @@ type chaosSessionRecorder struct {
 	logger    zerolog.Logger
 }
 
-func newChaosSessionRecorder(
-	ctx context.Context,
-	server []string,
-	gremlinNames []string,
-	seed int64,
-	intensity string,
-	params chaos.GremlinParams,
-	logger zerolog.Logger,
-) *chaosSessionRecorder {
+func newChaosSessionRecorder(ctx context.Context, recipe chaosRecipe, logger zerolog.Logger) *chaosSessionRecorder {
 	dataDir, err := datadir.Dir()
 	if err != nil {
 		logger.Warn().Err(err).Msg("resolving data dir; chaos session not recorded to history")
@@ -53,13 +45,6 @@ func newChaosSessionRecorder(
 	id := uuid.New().String()
 	now := time.Now()
 
-	recipe := chaosRecipe{
-		Gremlins:  gremlinNames,
-		Seed:      seed,
-		Intensity: intensity,
-		Params:    params,
-		Server:    server,
-	}
 	cfg, err := json.Marshal(recipe)
 	if err != nil {
 		logger.Warn().Err(err).Msg("marshalling chaos recipe; run not recorded")
@@ -68,7 +53,7 @@ func newChaosSessionRecorder(
 	rec := &chaosSessionRecorder{store: store, id: id, startedAt: now, logger: logger}
 	if err := store.InsertSession(ctx, models.ArenaSession{
 		ID:        id,
-		ServerID:  serverLabel(server),
+		ServerID:  serverLabel(recipe.Server),
 		Status:    models.SessionStatusRunning,
 		Config:    cfg,
 		StartedAt: now,

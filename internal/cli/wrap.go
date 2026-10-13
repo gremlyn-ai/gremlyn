@@ -38,8 +38,23 @@ func NewWrapCmd(logger zerolog.Logger) *cobra.Command {
 tool calls. gremlyn arena ci writes this command into the MCP config it hands the agent.
 
 All stdout output is MCP protocol traffic. Gremlyn logs go to stderr.`,
-		DisableFlagParsing: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var params chaos.GremlinParams
+			if chaosParamsJSON != "" {
+				if perr := json.Unmarshal([]byte(chaosParamsJSON), &params); perr != nil {
+					return fmt.Errorf("parsing --chaos-params: %w", perr)
+				}
+			}
+			setup := chaosSetup{
+				Gremlins:    chaosGremlins,
+				Seed:        chaosSeed,
+				Intensity:   chaosIntensity,
+				Params:      params,
+				Window:      chaosWindow,
+				EventsPath:  chaosEventsPath,
+				SummaryPath: chaosSummaryPath,
+			}
+
 			childArgs := cmd.ArgsLenAtDash()
 			if childArgs < 0 || len(args) == 0 {
 				return fmt.Errorf("usage: gremlyn wrap [flags] -- <command> [args...]\n\nMissing child command after '--'")
@@ -48,131 +63,8 @@ All stdout output is MCP protocol traffic. Gremlyn logs go to stderr.`,
 			if len(childCmd) == 0 {
 				return fmt.Errorf("no command specified after '--'")
 			}
-
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			var signaled atomic.Bool
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-			go func() {
-				<-sigCh
-				logger.Info().Msg("received shutdown signal")
-				signaled.Store(true)
-				cancel()
-			}()
-
-			name := serverName
-			if name == "" {
-				name = filepath.Base(childCmd[0])
-			}
-
-			proxyCfg := proxy.Config{
-				ServerName: name,
-				Command:    childCmd[0],
-			}
-			if len(childCmd) > 1 {
-				proxyCfg.Args = childCmd[1:]
-			}
-
-			pipeline := proxy.NewPipeline(logger)
-			defer pipeline.Close()
-
-			var (
-				observer   *chaos.Observer
-				eventSink  *chaos.FileEventSink
-				sessionRec *chaosSessionRecorder
-			)
-
-			var params chaos.GremlinParams
-			if chaosParamsJSON != "" {
-				if perr := json.Unmarshal([]byte(chaosParamsJSON), &params); perr != nil {
-					return fmt.Errorf("parsing --chaos-params: %w", perr)
-				}
-			}
-
-			if len(chaosGremlins) > 0 {
-				gs, err := chaos.BuildGremlinsWithParams(
-					chaosGremlins, chaosSeed, chaos.Intensity(chaosIntensity), params)
-				if err != nil {
-					return fmt.Errorf("configuring chaos: %w", err)
-				}
-
-				var sinks []chaos.EventSink
-				if chaosEventsPath != "" {
-					eventSink, err = chaos.NewFileEventSink(chaosEventsPath)
-					if err != nil {
-						return fmt.Errorf("configuring chaos events: %w", err)
-					}
-					defer func() {
-						if cerr := eventSink.Close(); cerr != nil {
-							logger.Warn().Err(cerr).Msg("closing chaos event file")
-						}
-					}()
-					sinks = append(sinks, eventSink)
-				}
-
-				sessionRec = newChaosSessionRecorder(
-					ctx, childCmd, chaosGremlins, chaosSeed, chaosIntensity, params, logger)
-				if sessionRec != nil {
-					sinks = append(sinks, sessionRec)
-				}
-
-				observer = chaos.NewObserver(combineEventSinks(sinks), logger, chaos.WithWindow(chaosWindow))
-				pipeline.RegisterHandler(chaos.NewGremlinHandler(gs, observer, logger))
-				pipeline.RegisterHandler(observer)
-
-				logger.Info().
-					Strs("gremlins", chaosGremlins).
-					Int64("seed", chaosSeed).
-					Str("intensity", chaosIntensity).
-					Msg("chaos mode enabled")
-			}
-
-			proxyOpts := []proxy.Option{
-				proxy.WithLogger(logger),
-				proxy.WithPipeline(pipeline),
-			}
-
-			p := proxy.NewWrapProxy(proxyCfg, proxyOpts...)
-
-			logger.Info().
-				Str("server", name).
-				Str("command", childCmd[0]).
-				Msg("starting wrap proxy")
-
-			runErr := p.Start(ctx)
-
-			if observer != nil {
-				endedNormally := sessionEndedNormally(runErr, ctx.Err(), signaled.Load())
-				cov := observer.Finalize(context.WithoutCancel(ctx), endedNormally)
-				logger.Info().
-					Int("injected", cov.Injected).
-					Int("observed", cov.Observed).
-					Int("unresolved", cov.Unresolved).
-					Bool("complete", cov.Complete()).
-					Msg("chaos session finished")
-
-				if chaosSummaryPath != "" {
-					summary := chaos.SessionSummary{
-						Coverage:      cov,
-						Gremlins:      chaosGremlins,
-						Seed:          chaosSeed,
-						Intensity:     chaosIntensity,
-						Params:        params,
-						ServerCommand: childCmd,
-					}
-					if werr := chaos.WriteSummary(chaosSummaryPath, summary); werr != nil {
-						logger.Warn().Err(werr).Msg("writing chaos summary")
-					}
-				}
-
-				if sessionRec != nil {
-					sessionRec.finish(context.WithoutCancel(ctx), runErr)
-				}
-			}
-
-			return runErr
+			setup.ServerCommand = childCmd
+			return runStdioWrap(logger, serverName, childCmd, setup)
 		},
 	}
 
@@ -197,6 +89,47 @@ All stdout output is MCP protocol traffic. Gremlyn logs go to stderr.`,
 		"How long the agent has to react to an injection before silence is taken as the answer")
 
 	return cmd
+}
+
+func runStdioWrap(logger zerolog.Logger, serverName string, childCmd []string, setup chaosSetup) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var signaled atomic.Bool
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	go func() {
+		select {
+		case <-sigCh:
+			logger.Info().Msg("received shutdown signal")
+			signaled.Store(true)
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	name := serverName
+	if name == "" {
+		name = filepath.Base(childCmd[0])
+	}
+	proxyCfg := proxy.Config{ServerName: name, Command: childCmd[0]}
+	if len(childCmd) > 1 {
+		proxyCfg.Args = childCmd[1:]
+	}
+
+	run, err := newChaosRun(ctx, setup, logger)
+	if err != nil {
+		return err
+	}
+	defer run.close()
+
+	p := proxy.NewWrapProxy(proxyCfg, proxy.WithLogger(logger), proxy.WithPipeline(run.pipeline))
+	logger.Info().Str("server", name).Str("command", childCmd[0]).Msg("starting wrap proxy")
+
+	runErr := p.Start(ctx)
+	run.finish(ctx, runErr, sessionEndedNormally(runErr, ctx.Err(), signaled.Load()))
+	return runErr
 }
 
 func sessionEndedNormally(runErr, ctxErr error, signaled bool) bool {
