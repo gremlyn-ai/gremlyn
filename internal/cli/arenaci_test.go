@@ -455,3 +455,16 @@ func TestWriteScenarioText_Color(t *testing.T) {
 	writeScenarioText(&off, &res)
 	assert.NotContains(t, off.String(), "\x1b[", "NO_COLOR wins over FORCE_COLOR")
 }
+
+func TestExampleHTTPScenarioFile(t *testing.T) {
+	t.Setenv("ACME_MCP_TOKEN", "example")
+	cfg, err := loadCIConfig(filepath.Join("..", "..", "examples", "arena-http.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "https://mcp.acme.example/mcp", cfg.MCPServer.URL)
+	assert.Empty(t, cfg.MCPServer.Command)
+	assert.NotEmpty(t, cfg.Scenarios)
+
+	t.Setenv("ACME_MCP_TOKEN", "")
+	_, err = loadCIConfig(filepath.Join("..", "..", "examples", "arena-http.yaml"))
+	require.Error(t, err, "the example must refuse to run without its token")
+}
