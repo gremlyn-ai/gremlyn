@@ -19,6 +19,15 @@ import (
 )
 
 func TestValidateCIConfig(t *testing.T) {
+	t.Setenv("GREMLYN_TEST_TOKEN", "tok")
+	t.Setenv("GREMLYN_TEST_EMPTY", "")
+	httpServer := func(c *CIConfig) {
+		c.MCPServer = MCPServerConfig{
+			Name:    "acme",
+			URL:     "https://mcp.acme.example/mcp",
+			Headers: map[string]string{"Authorization": "Bearer ${GREMLYN_TEST_TOKEN}"},
+		}
+	}
 	valid := func() CIConfig {
 		return CIConfig{
 			Agent:     AgentConfig{Command: []string{"agent", "--mcp-config", PlaceholderMCPConfig}},
@@ -39,7 +48,43 @@ func TestValidateCIConfig(t *testing.T) {
 			func(c *CIConfig) { c.Agent.Command = []string{"agent", "-p", "hi"} },
 			"must contain {{mcp_config}}",
 		},
-		{"no server command", func(c *CIConfig) { c.MCPServer.Command = nil }, "mcp_server.command is required"},
+		{"neither command nor url", func(c *CIConfig) { c.MCPServer.Command = nil }, "needs command (stdio) or url"},
+		{"both command and url", func(c *CIConfig) { c.MCPServer.URL = "https://mcp.acme.example/mcp" }, "not both"},
+		{"an https url with an expanded header", httpServer, ""},
+		{"plain http on loopback", func(c *CIConfig) {
+			httpServer(c)
+			c.MCPServer.URL = "http://127.0.0.1:8080/mcp"
+		}, ""},
+		{"plain http off loopback", func(c *CIConfig) {
+			httpServer(c)
+			c.MCPServer.URL = "http://mcp.acme.example/mcp"
+		}, "plain http"},
+		{"credentials in the url", func(c *CIConfig) {
+			httpServer(c)
+			c.MCPServer.URL = "https://u:p@mcp.acme.example/mcp"
+		}, "must not carry credentials"},
+		{"a missing environment variable", func(c *CIConfig) {
+			httpServer(c)
+			c.MCPServer.Headers["Authorization"] = "Bearer ${GREMLYN_TEST_UNSET_VAR}"
+		}, "GREMLYN_TEST_UNSET_VAR is not set"},
+		{"an empty environment variable", func(c *CIConfig) {
+			httpServer(c)
+			c.MCPServer.Headers["Authorization"] = "Bearer ${GREMLYN_TEST_EMPTY}"
+		}, "GREMLYN_TEST_EMPTY is not set"},
+		{"a header the proxy manages", func(c *CIConfig) {
+			httpServer(c)
+			c.MCPServer.Headers["Mcp-Session-Id"] = "x"
+		}, "managed by the proxy"},
+		{"headers on a stdio server", func(c *CIConfig) {
+			c.MCPServer.Headers = map[string]string{"X-A": "b"}
+		}, "applies to a url server only"},
+		{"request_timeout on a stdio server", func(c *CIConfig) {
+			c.MCPServer.RequestTimeout = time.Second
+		}, "applies to a url server only"},
+		{"a negative request_timeout", func(c *CIConfig) {
+			httpServer(c)
+			c.MCPServer.RequestTimeout = -time.Second
+		}, "must be positive"},
 		{"no scenarios", func(c *CIConfig) { c.Scenarios = nil }, "at least one scenario"},
 		{"scenario without a name", func(c *CIConfig) { c.Scenarios[0].Name = "" }, "name is required"},
 		{"scenario without gremlins", func(c *CIConfig) { c.Scenarios[0].Gremlins = nil }, "at least one gremlin"},

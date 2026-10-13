@@ -58,6 +58,13 @@ type SessionSummary struct {
 	Intensity     string        `json:"intensity,omitempty"`
 	Params        GremlinParams `json:"params,omitempty"`
 	ServerCommand []string      `json:"server_command,omitempty"`
+	ServerURL     string        `json:"server_url,omitempty"`
+	Upstream      UpstreamStats `json:"upstream,omitzero"`
+}
+
+type UpstreamStats struct {
+	Timeouts int `json:"timeouts,omitempty"`
+	Failures int `json:"failures,omitempty"`
 }
 
 func (s SessionSummary) Replayable() bool {

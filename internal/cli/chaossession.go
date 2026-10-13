@@ -21,6 +21,7 @@ type chaosRecipe struct {
 	Intensity string              `json:"intensity,omitempty"`
 	Params    chaos.GremlinParams `json:"params,omitempty"`
 	Server    []string            `json:"server_command,omitempty"`
+	ServerURL string              `json:"server_url,omitempty"`
 }
 
 type chaosSessionRecorder struct {
@@ -53,7 +54,7 @@ func newChaosSessionRecorder(ctx context.Context, recipe chaosRecipe, logger zer
 	rec := &chaosSessionRecorder{store: store, id: id, startedAt: now, logger: logger}
 	if err := store.InsertSession(ctx, models.ArenaSession{
 		ID:        id,
-		ServerID:  serverLabel(recipe.Server),
+		ServerID:  recipe.label(),
 		Status:    models.SessionStatusRunning,
 		Config:    cfg,
 		StartedAt: now,
@@ -149,6 +150,13 @@ func combineEventSinks(sinks []chaos.EventSink) chaos.EventSink {
 	default:
 		return multiEventSink(sinks)
 	}
+}
+
+func (r chaosRecipe) label() string {
+	if r.ServerURL != "" {
+		return r.ServerURL
+	}
+	return serverLabel(r.Server)
 }
 
 func serverLabel(argv []string) string {

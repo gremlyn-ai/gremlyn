@@ -29,15 +29,24 @@ func NewWrapCmd(logger zerolog.Logger) *cobra.Command {
 		chaosSummaryPath string
 		chaosWindow      time.Duration
 		chaosParamsJSON  string
+		upstreamURL      string
+		upstreamHeaders  []string
+		upstreamTimeout  time.Duration
+		listenAddr       string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "wrap [flags] -- <command> [args...]",
+		Use:   "wrap [flags] -- <command> [args...] | wrap --upstream <url> [flags]",
 		Short: "Run an MCP server behind the chaos proxy",
-		Long: `Wraps a stdio MCP server process and injects controlled failures into its
-tool calls. gremlyn arena ci writes this command into the MCP config it hands the agent.
+		Long: `Wraps a stdio MCP server process, or fronts a Streamable HTTP MCP server with
+--upstream, and injects controlled failures into its tool calls.
 
-All stdout output is MCP protocol traffic. Gremlyn logs go to stderr.`,
+stdio: gremlyn arena ci writes this command into the MCP config it hands the agent.
+All stdout output is MCP protocol traffic. Gremlyn logs go to stderr.
+
+--upstream: the proxy listens on a loopback address and prints its URL on stderr;
+point the agent's MCP client at it. --upstream-header values expand ${VAR} from the
+environment, so a token can stay out of the command line: single-quote the flag.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var params chaos.GremlinParams
 			if chaosParamsJSON != "" {
@@ -53,6 +62,35 @@ All stdout output is MCP protocol traffic. Gremlyn logs go to stderr.`,
 				Window:      chaosWindow,
 				EventsPath:  chaosEventsPath,
 				SummaryPath: chaosSummaryPath,
+			}
+
+			if upstreamURL != "" {
+				if len(args) > 0 {
+					return errors.New("--upstream fronts an HTTP server: drop the command after '--'")
+				}
+				headers, err := parseHeaderFlags(upstreamHeaders)
+				if err != nil {
+					return err
+				}
+				headers, err = resolveHeaders(headers, os.LookupEnv)
+				if err != nil {
+					return fmt.Errorf("--upstream-header: %w", err)
+				}
+				name := serverName
+				if name == "" {
+					name = "upstream"
+				}
+				return runUpstreamWrap(cmd, logger, upstreamTarget{
+					Name:           name,
+					URL:            upstreamURL,
+					Headers:        headers,
+					ListenAddr:     listenAddr,
+					RequestTimeout: upstreamTimeout,
+				}, setup)
+			}
+
+			if len(upstreamHeaders) > 0 || cmd.Flags().Changed("listen") || cmd.Flags().Changed("upstream-timeout") {
+				return errors.New("--upstream-header, --listen and --upstream-timeout apply with --upstream only")
 			}
 
 			childArgs := cmd.ArgsLenAtDash()
@@ -87,6 +125,15 @@ All stdout output is MCP protocol traffic. Gremlyn logs go to stderr.`,
 			`injection_text, identity_text, loop_message`)
 	cmd.Flags().DurationVar(&chaosWindow, "chaos-window", chaos.DefaultWindow,
 		"How long the agent has to react to an injection before silence is taken as the answer")
+
+	cmd.Flags().StringVar(&upstreamURL, "upstream", "",
+		"Front this Streamable HTTP MCP endpoint instead of a stdio command: https, or http on a loopback address")
+	cmd.Flags().StringArrayVar(&upstreamHeaders, "upstream-header", nil,
+		`Header sent to the upstream, "Name: value" (repeatable). ${VAR} expands from the environment`)
+	cmd.Flags().DurationVar(&upstreamTimeout, "upstream-timeout", proxy.DefaultRequestTimeout,
+		"How long the upstream may stay silent on a request before the agent gets a 504")
+	cmd.Flags().StringVar(&listenAddr, "listen", proxy.DefaultListenAddr,
+		"Loopback address the HTTP proxy listens on; port 0 picks a free one")
 
 	return cmd
 }
@@ -128,8 +175,26 @@ func runStdioWrap(logger zerolog.Logger, serverName string, childCmd []string, s
 	logger.Info().Str("server", name).Str("command", childCmd[0]).Msg("starting wrap proxy")
 
 	runErr := p.Start(ctx)
-	run.finish(ctx, runErr, sessionEndedNormally(runErr, ctx.Err(), signaled.Load()))
+	run.finish(ctx, runErr, sessionEndedNormally(runErr, ctx.Err(), signaled.Load()), chaos.UpstreamStats{})
 	return runErr
+}
+
+func runUpstreamWrap(cmd *cobra.Command, logger zerolog.Logger, target upstreamTarget, setup chaosSetup) error {
+	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	h, err := startHTTPChaos(ctx, target, setup, logger)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "gremlyn: proxying %s at %s\n", h.run.setup.ServerURL, h.URL())
+
+	<-ctx.Done()
+	logger.Info().Msg("shutting down the http proxy")
+	if diag := h.stop(ctx); diag != nil {
+		return fmt.Errorf("the MCP server could not be proxied: %w", diag)
+	}
+	return nil
 }
 
 func sessionEndedNormally(runErr, ctxErr error, signaled bool) bool {

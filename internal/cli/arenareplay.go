@@ -74,6 +74,13 @@ func replayCommand(s chaos.SessionSummary) (string, error) {
 		parts = append(parts, "--chaos-params "+shellArg(string(encoded)))
 	}
 
+	if s.ServerURL != "" {
+		parts = append(parts,
+			"--upstream "+shellArg(s.ServerURL),
+			"--upstream-header "+shellArg("<header values are never recorded: add each one your server needs>"))
+		return strings.Join(parts, " \\\n  "), nil
+	}
+
 	server := s.ServerCommand
 	if len(server) == 0 {
 		server = []string{"<server command was not recorded — add it here>"}

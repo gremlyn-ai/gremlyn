@@ -10,6 +10,8 @@ import (
 	"github.com/rs/zerolog"
 )
 
+const httpDrainGrace = 10 * time.Second
+
 type chaosSetup struct {
 	Gremlins      []string
 	Seed          int64
@@ -19,6 +21,7 @@ type chaosSetup struct {
 	EventsPath    string
 	SummaryPath   string
 	ServerCommand []string
+	ServerURL     string
 }
 
 type chaosRun struct {
@@ -58,6 +61,7 @@ func newChaosRun(ctx context.Context, setup chaosSetup, logger zerolog.Logger) (
 		Intensity: setup.Intensity,
 		Params:    setup.Params,
 		Server:    setup.ServerCommand,
+		ServerURL: setup.ServerURL,
 	}, logger)
 	if r.session != nil {
 		sinks = append(sinks, r.session)
@@ -79,7 +83,7 @@ func newChaosRun(ctx context.Context, setup chaosSetup, logger zerolog.Logger) (
 	return r, nil
 }
 
-func (r *chaosRun) finish(ctx context.Context, runErr error, ended bool) {
+func (r *chaosRun) finish(ctx context.Context, runErr error, ended bool, upstream chaos.UpstreamStats) {
 	if r.observer == nil {
 		return
 	}
@@ -100,6 +104,8 @@ func (r *chaosRun) finish(ctx context.Context, runErr error, ended bool) {
 			Intensity:     r.setup.Intensity,
 			Params:        r.setup.Params,
 			ServerCommand: r.setup.ServerCommand,
+			ServerURL:     r.setup.ServerURL,
+			Upstream:      upstream,
 		}
 		if err := chaos.WriteSummary(r.setup.SummaryPath, summary); err != nil {
 			r.logger.Warn().Err(err).Msg("writing chaos summary")
@@ -118,4 +124,62 @@ func (r *chaosRun) close() {
 			r.logger.Warn().Err(err).Msg("closing chaos event file")
 		}
 	}
+}
+
+type upstreamTarget struct {
+	Name           string
+	URL            string
+	Headers        map[string]string
+	ListenAddr     string
+	RequestTimeout time.Duration
+}
+
+type httpChaos struct {
+	run   *chaosRun
+	proxy *proxy.HTTPProxy
+}
+
+func startHTTPChaos(ctx context.Context, target upstreamTarget, setup chaosSetup, logger zerolog.Logger) (*httpChaos, error) {
+	u, err := proxy.ValidateUpstreamURL(target.URL)
+	if err != nil {
+		return nil, fmt.Errorf("upstream: %w", err)
+	}
+	setup.ServerURL = proxy.RedactURL(u)
+	setup.ServerCommand = nil
+
+	run, err := newChaosRun(ctx, setup, logger)
+	if err != nil {
+		return nil, err
+	}
+	p, err := proxy.NewHTTPProxy(proxy.HTTPConfig{
+		ServerName:     target.Name,
+		URL:            target.URL,
+		Headers:        target.Headers,
+		ListenAddr:     target.ListenAddr,
+		RequestTimeout: target.RequestTimeout,
+	}, proxy.WithLogger(logger), proxy.WithPipeline(run.pipeline))
+	if err != nil {
+		run.close()
+		return nil, fmt.Errorf("configuring the http proxy: %w", err)
+	}
+	if err := p.Start(ctx); err != nil {
+		run.close()
+		return nil, fmt.Errorf("starting the http proxy: %w", err)
+	}
+	return &httpChaos{run: run, proxy: p}, nil
+}
+
+func (h *httpChaos) URL() string { return h.proxy.URL() }
+
+func (h *httpChaos) stop(ctx context.Context) error {
+	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), httpDrainGrace)
+	defer cancel()
+	if err := h.proxy.Shutdown(drainCtx); err != nil {
+		h.run.logger.Warn().Err(err).Msg("stopping the http proxy")
+	}
+	diagnostic := h.proxy.Diagnostic()
+	stats := h.proxy.Stats()
+	h.run.finish(ctx, diagnostic, diagnostic == nil, chaos.UpstreamStats{Timeouts: stats.Timeouts, Failures: stats.Failures})
+	h.run.close()
+	return diagnostic
 }

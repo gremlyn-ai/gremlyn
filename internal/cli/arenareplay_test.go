@@ -167,3 +167,18 @@ func splitRespectingQuotes(s string) []string {
 	}
 	return fields
 }
+
+func TestReplay_HTTPUpstream(t *testing.T) {
+	path := writeSummary(t, chaos.SessionSummary{
+		Gremlins:  []string{"timeout"},
+		Seed:      42,
+		Intensity: "certain",
+		ServerURL: "https://mcp.example.com/mcp",
+	})
+
+	out, _, err := runReplay(t, path)
+	require.NoError(t, err)
+	assert.Contains(t, out, "--upstream https://mcp.example.com/mcp")
+	assert.Contains(t, out, "--upstream-header")
+	assert.NotContains(t, out, " -- ", "an HTTP upstream has no child command")
+}

@@ -40,8 +40,11 @@ type AgentConfig struct {
 }
 
 type MCPServerConfig struct {
-	Name    string   `yaml:"name"`
-	Command []string `yaml:"command"`
+	Name           string            `yaml:"name"`
+	Command        []string          `yaml:"command"`
+	URL            string            `yaml:"url"`
+	Headers        map[string]string `yaml:"headers"`
+	RequestTimeout time.Duration     `yaml:"request_timeout"`
 }
 
 type ScenarioConfig struct {
@@ -66,6 +69,7 @@ type ScenarioResult struct {
 	Coverage chaos.Coverage           `json:"coverage"`
 	Events   int                      `json:"events"`
 	Skipped  int                      `json:"skipped_partial_events"`
+	Upstream chaos.UpstreamStats      `json:"upstream,omitzero"`
 	AgentErr string                   `json:"agent_error,omitempty"`
 	Failures []string                 `json:"failures,omitempty"`
 }
@@ -203,8 +207,8 @@ func validateCIConfig(cfg *CIConfig) error {
 		return fmt.Errorf("agent.command must contain %s, otherwise the agent never talks through the proxy",
 			PlaceholderMCPConfig)
 	}
-	if len(cfg.MCPServer.Command) == 0 {
-		return errors.New("mcp_server.command is required")
+	if err := validateMCPServer(&cfg.MCPServer, os.LookupEnv); err != nil {
+		return err
 	}
 	if len(cfg.Scenarios) == 0 {
 		return errors.New("at least one scenario is required")
@@ -271,7 +275,23 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 		seed = gremlins.DefaultSeed
 	}
 
-	if err := writeMCPConfig(mcpPath, self, cfg.MCPServer, sc, seed, eventsPath, summaryPath); err != nil {
+	var upstream *httpChaos
+	if cfg.MCPServer.URL != "" {
+		upstream, err = startScenarioProxy(ctx, logger, cfg.MCPServer, sc, seed, eventsPath, summaryPath)
+		if err != nil {
+			res.Failures = append(res.Failures, err.Error())
+			return res
+		}
+		err = writeHTTPMCPConfig(mcpPath, cfg.MCPServer.Name, upstream.URL())
+	} else {
+		err = writeMCPConfig(mcpPath, self, cfg.MCPServer, sc, seed, eventsPath, summaryPath)
+	}
+	if err != nil {
+		if upstream != nil {
+			if diag := upstream.stop(ctx); diag != nil {
+				res.Failures = append(res.Failures, "the MCP server could not be proxied: "+diag.Error())
+			}
+		}
 		res.Failures = append(res.Failures, err.Error())
 		return res
 	}
@@ -299,6 +319,12 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 		logger.Warn().Err(agentErr).Str("scenario", sc.Name).Msg("agent exited non-zero")
 	}
 
+	if upstream != nil {
+		if diag := upstream.stop(ctx); diag != nil {
+			res.Failures = append(res.Failures, "the MCP server could not be proxied: "+diag.Error())
+		}
+	}
+
 	events, skipped, err := chaos.ReadEvents(eventsPath)
 	if err != nil {
 		res.Failures = append(res.Failures,
@@ -318,10 +344,87 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 		return res
 	}
 	res.Coverage = summary.Coverage
+	res.Upstream = summary.Upstream
 	res.Report = scoring.Score(events, nil)
 
+	res.Failures = append(res.Failures, upstreamFailures(res.Upstream)...)
 	res.Failures = append(res.Failures, checkThresholds(cfg.Thresholds, res)...)
 	return res
+}
+
+func upstreamFailures(u chaos.UpstreamStats) []string {
+	var out []string
+	if u.Timeouts > 0 {
+		out = append(out, fmt.Sprintf(
+			"the MCP server itself timed out %d time(s), outside any gremlin: the agent reacted to a real failure, "+
+				"so the score cannot be attributed (raise mcp_server.request_timeout if the server is just slow)", u.Timeouts))
+	}
+	if u.Failures > 0 {
+		out = append(out, fmt.Sprintf(
+			"the MCP server failed %d time(s) outside any gremlin (unreachable, broken stream or over the size cap): "+
+				"the score cannot be attributed", u.Failures))
+	}
+	return out
+}
+
+func startScenarioProxy(
+	ctx context.Context,
+	logger zerolog.Logger,
+	srv MCPServerConfig,
+	sc ScenarioConfig,
+	seed int64,
+	eventsPath, summaryPath string,
+) (*httpChaos, error) {
+	headers, err := resolveHeaders(srv.Headers, os.LookupEnv)
+	if err != nil {
+		return nil, fmt.Errorf("mcp_server.headers: %w", err)
+	}
+	return startHTTPChaos(ctx, upstreamTarget{
+		Name:           serverName(srv),
+		URL:            srv.URL,
+		Headers:        headers,
+		RequestTimeout: srv.RequestTimeout,
+	}, chaosSetup{
+		Gremlins:    sc.Gremlins,
+		Seed:        seed,
+		Intensity:   string(intensityOf(sc)),
+		Params:      sc.Params,
+		Window:      sc.Window,
+		EventsPath:  eventsPath,
+		SummaryPath: summaryPath,
+	}, logger)
+}
+
+func serverName(srv MCPServerConfig) string {
+	if srv.Name == "" {
+		return "gremlyn-target"
+	}
+	return srv.Name
+}
+
+type httpMCPServer struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+type httpMCPConfig struct {
+	MCPServers map[string]httpMCPServer `json:"mcpServers"`
+}
+
+func writeHTTPMCPConfig(path, name, localURL string) error {
+	if name == "" {
+		name = "gremlyn-target"
+	}
+	data, err := json.MarshalIndent(httpMCPConfig{
+		MCPServers: map[string]httpMCPServer{name: {Type: "http", URL: localURL}},
+	}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshalling MCP config: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("writing MCP config %q: %w", path, err)
+	}
+	return nil
 }
 
 func checkThresholds(th ThresholdConfig, res ScenarioResult) []string {
@@ -357,10 +460,7 @@ func checkThresholds(th ThresholdConfig, res ScenarioResult) []string {
 }
 
 func writeMCPConfig(path, self string, srv MCPServerConfig, sc ScenarioConfig, seed int64, eventsPath, summaryPath string) error {
-	name := srv.Name
-	if name == "" {
-		name = "gremlyn-target"
-	}
+	name := serverName(srv)
 
 	args := make([]string, 0, 14+len(srv.Command))
 	args = append(args,
