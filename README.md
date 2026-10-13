@@ -210,6 +210,25 @@ never called a tool fails**, because nothing was injected and nothing was measur
 `gremlyn arena ci --scenario <name>`. Delays, payload sizes, the injected text and the
 observation `window` can be set per scenario; see [`.gremlyn/arena.yaml`](.gremlyn/arena.yaml).
 
+**A remote server over Streamable HTTP** takes a `url` instead of a `command`, and the
+headers it needs:
+
+```yaml
+mcp_server:
+  name: acme
+  url: https://mcp.acme.example/mcp
+  headers:
+    Authorization: "Bearer ${ACME_MCP_TOKEN}"
+  request_timeout: 60s
+```
+
+Gremlyn starts a proxy on `127.0.0.1` for the run and hands the agent that local URL; the
+headers stay in the gremlyn process and are never written to a file, a log or the report.
+`${VAR}` is the only expansion, and an unset variable stops the run before it starts. The
+`url` is `https`, or `http` on a loopback address. A full file is in
+[`examples/arena-http.yaml`](examples/arena-http.yaml). To try it by hand,
+`gremlyn wrap --upstream <url>` prints a local URL to point any MCP client at.
+
 <br>
 
 ## The eight gremlins
@@ -273,9 +292,15 @@ the agent can have changed, and `--max-turns` bounds the fix loop.
 
 ## Limits, stated plainly
 
-- **stdio MCP servers only.** HTTP and SSE servers are not proxied.
-- **`latency` and `timeout` delay their whole direction**, not just the message they target,
-  because the proxy keeps messages in order.
+- **stdio and Streamable HTTP MCP servers.** The legacy HTTP+SSE transport (separate `/sse`
+  and `/messages` endpoints) is detected and refused, and so are JSON-RPC batches.
+- **Static headers only, no OAuth flow.** Bring a token your server accepts and reference it
+  as `${VAR}`; [`docs/core.md`](docs/core.md#credentials) says how, and what OAuth would take.
+- **On stdio, `latency` and `timeout` delay their whole direction**, not just the message they
+  target, because the proxy keeps messages in order on one pipe. Over HTTP they delay only
+  the targeted exchange.
+- **`timeout` times out the answer, not the call.** The server still executes the tool call;
+  the agent gets an error instead of the result. For a tool that writes, the write happened.
 - **The 30-second observation window is not calibrated** on real traffic yet. Tune it per
   scenario with `window`.
 - **Scores vary between runs**, as explained above.

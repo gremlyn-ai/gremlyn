@@ -19,7 +19,9 @@ after a failure. Everything in this package serves that rule.
 5. `internal/arena/scoring` turns the events into a `ResilienceReport`.
 
 `gremlyn arena ci` and `gremlyn wrap --chaos-*` are the two entry points. The Claude Code
-plugin and the GitHub Action both call `arena ci`.
+plugin and the GitHub Action both call `arena ci`. Both work on a stdio server and on a
+Streamable HTTP server (`docs/core.md`); the stages are the same and do not know which
+transport carries the message.
 
 ## The gremlins
 
@@ -73,15 +75,46 @@ Breaking one of these silently produces numbers nobody can trust.
 - **Stage order is part of the contract.** Observer 50, then gremlins 100.
 - **Scoring is pure.** No clock, no randomness, no IO, no map-iteration order in a decision.
 
-A known limit: `latency` and `timeout` delay their whole direction, not just their target,
-because the proxy processes each direction in order. Keep it in mind when a scenario mixes
-a timing gremlin with others.
+## Timing gremlins and the transport
+
+`latency` and `timeout` hold a tool result inside the pipeline, for their delay. What else
+waits depends on the transport:
+
+- **stdio**: the proxy processes each direction in order, on one pipe, so every message
+  behind the held one waits too. A timing gremlin delays its whole direction, not just its
+  target. Keep it in mind when a scenario mixes a timing gremlin with others.
+- **Streamable HTTP**: each POST is served on its own, so a held result delays **only the
+  targeted exchange**. Other tool calls in flight, and the `GET` stream, carry on. Within one
+  SSE stream, events stay in order: the events behind the held one on that same stream wait
+  for it.
+
+**What `timeout` does with the request it times out, on both transports.** It acts on the
+response, not the request. The `tools/call` is forwarded, the server executes it and
+answers, and the gremlin holds that answer for its delay, then replaces it with JSON-RPC
+error -32001, `server timeout after <delay>`. So the call did happen on the server: for a tool
+that writes, the write is done when the agent sees the timeout. Over HTTP the error arrives
+where the result would have, in the same JSON body or SSE event, with status 200.
+
+A real upstream timeout looks different, on purpose: a `504` carrying JSON-RPC error -32603,
+`the upstream MCP server did not answer within <request_timeout>`. It never goes through the
+gremlins, so it is never an event. `arena ci` counts it in the scenario's `upstream` field and
+fails the scenario, because the agent then reacted to a real failure that no gremlin owns.
+
+**Determinism.** Each gremlin's RNG is shared by both directions and guarded, and its draws
+follow the order in which messages reach the pipeline. On stdio that order is the pipe's.
+Over HTTP it is the order of arrival; an agent that issues tool calls one at a time, which is
+what the observer's window assumes anyway, gets the same decisions from the same seed. Two
+calls sent at the same instant can reach the pipeline in either order, as they can on a
+stdio server that answers out of order.
 
 ## A run's lifecycle
 
 `internal/cli/chaossession.go` writes each run as `running`, then `completed` when the agent
 ended the session, by closing stdin or with SIGTERM, or `failed` when the proxy itself
-errored. Events are appended to `events.jsonl` and synced one by one, so a proxy killed
+errored. Over HTTP the session ends when `arena ci`'s agent exits or `wrap --upstream` is
+stopped, and it is `failed` when the proxy left a diagnostic: a legacy server, a refused
+credential, a redirect. The record names an HTTP server by its URL without the query; header
+values are never recorded. Events are appended to `events.jsonl` and synced one by one, so a proxy killed
 outright keeps every observation it made; its record just stays `running`.
 
 History lives under `~/.gremlyn/arena/sessions/`, one directory per run with `session.json`
@@ -105,7 +138,14 @@ internal/arena/
 ./bin/gremlyn wrap --chaos-gremlins timeout,corruption --chaos-seed 1 --chaos-intensity certain \
   --chaos-events events.jsonl --chaos-summary summary.json \
   -- npx -y @modelcontextprotocol/server-memory
+./bin/gremlyn wrap --upstream https://mcp.acme.example/mcp \
+  --upstream-header 'Authorization: Bearer ${ACME_MCP_TOKEN}' \
+  --chaos-gremlins timeout --chaos-intensity certain
 ```
+
+With `--upstream`, the proxy prints the local URL to give the agent's MCP client. Single-quote
+`--upstream-header` so the shell leaves `${VAR}` to gremlyn and the token stays out of the
+process list.
 
 ## Adding a gremlin
 
