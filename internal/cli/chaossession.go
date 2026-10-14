@@ -16,12 +16,13 @@ import (
 )
 
 type chaosRecipe struct {
-	Gremlins  []string            `json:"gremlins"`
-	Seed      int64               `json:"seed"`
-	Intensity string              `json:"intensity,omitempty"`
-	Params    chaos.GremlinParams `json:"params,omitempty"`
-	Server    []string            `json:"server_command,omitempty"`
-	ServerURL string              `json:"server_url,omitempty"`
+	Gremlins    []string                          `json:"gremlins"`
+	Seed        int64                             `json:"seed"`
+	Intensity   string                            `json:"intensity,omitempty"`
+	Params      chaos.GremlinParams               `json:"params,omitempty"`
+	Annotations map[string]models.ToolAnnotations `json:"annotations,omitempty"`
+	Server      []string                          `json:"server_command,omitempty"`
+	ServerURL   string                            `json:"server_url,omitempty"`
 }
 
 type chaosSessionRecorder struct {
@@ -72,8 +73,8 @@ func (r *chaosSessionRecorder) RecordEvent(ctx context.Context, e models.ArenaEv
 	return r.store.InsertEvent(ctx, e)
 }
 
-func (r *chaosSessionRecorder) finish(ctx context.Context, runErr error, upstream chaos.UpstreamStats) {
-	events, err := r.store.ListBySession(ctx, r.id)
+func (r *chaosSessionRecorder) finish(ctx context.Context, runErr error, upstream chaos.UpstreamStats, tools models.ToolCatalog) {
+	recorded, err := r.store.ListBySession(ctx, r.id)
 	if err != nil {
 		r.logger.Warn().Err(err).Str("session_id", r.id).Msg("reading events to finalize session")
 		return
@@ -85,6 +86,7 @@ func (r *chaosSessionRecorder) finish(ctx context.Context, runErr error, upstrea
 		return
 	}
 
+	events := chaos.Rescore(recorded, tools)
 	report := scoring.Score(events, nil)
 
 	var sent, survived, crashed, hijacked int
@@ -117,6 +119,7 @@ func (r *chaosSessionRecorder) finish(ctx context.Context, runErr error, upstrea
 	sess.GremlinsSurvived = survived
 	sess.GremlinsCrashed = crashed
 	sess.GremlinsHijacked = hijacked
+	sess.Tools = tools
 	sess.UpstreamTimeouts = upstream.Timeouts
 	sess.UpstreamFailures = upstream.Failures
 	sess.CompletedAt = &now

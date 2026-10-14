@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gremlyn-ai/gremlyn/internal/arena/chaos"
+	"github.com/gremlyn-ai/gremlyn/pkg/models"
 	"github.com/gremlyn-ai/gremlyn/pkg/proxy"
 	"github.com/rs/zerolog"
 )
@@ -22,6 +23,7 @@ type chaosSetup struct {
 	Intensity     string
 	Params        chaos.GremlinParams
 	Window        time.Duration
+	Annotations   map[string]models.ToolAnnotations
 	EventsPath    string
 	SummaryPath   string
 	ServerCommand []string
@@ -60,12 +62,13 @@ func newChaosRun(ctx context.Context, setup chaosSetup, logger zerolog.Logger) (
 	}
 
 	r.session = newChaosSessionRecorder(ctx, chaosRecipe{
-		Gremlins:  setup.Gremlins,
-		Seed:      setup.Seed,
-		Intensity: setup.Intensity,
-		Params:    setup.Params,
-		Server:    setup.ServerCommand,
-		ServerURL: setup.ServerURL,
+		Gremlins:    setup.Gremlins,
+		Seed:        setup.Seed,
+		Intensity:   setup.Intensity,
+		Params:      setup.Params,
+		Annotations: setup.Annotations,
+		Server:      setup.ServerCommand,
+		ServerURL:   setup.ServerURL,
 	}, logger)
 	if r.session != nil {
 		sinks = append(sinks, r.session)
@@ -75,7 +78,8 @@ func newChaosRun(ctx context.Context, setup chaosSetup, logger zerolog.Logger) (
 	if window <= 0 {
 		window = chaos.DefaultWindow
 	}
-	r.observer = chaos.NewObserver(combineEventSinks(sinks), logger, chaos.WithWindow(window))
+	r.observer = chaos.NewObserver(combineEventSinks(sinks), logger,
+		chaos.WithWindow(window), chaos.WithAnnotationOverrides(setup.Annotations))
 	r.pipeline.RegisterHandler(chaos.NewGremlinHandler(gs, r.observer, logger))
 	r.pipeline.RegisterHandler(r.observer)
 
@@ -93,6 +97,7 @@ func (r *chaosRun) finish(ctx context.Context, runErr error, ended bool, upstrea
 	}
 	ctx = context.WithoutCancel(ctx)
 	cov := r.observer.Finalize(ctx, ended)
+	tools := r.observer.Tools()
 	r.logger.Info().
 		Int("injected", cov.Injected).
 		Int("observed", cov.Observed).
@@ -110,6 +115,7 @@ func (r *chaosRun) finish(ctx context.Context, runErr error, ended bool, upstrea
 			ServerCommand: r.setup.ServerCommand,
 			ServerURL:     r.setup.ServerURL,
 			Upstream:      upstream,
+			Tools:         tools,
 		}
 		if err := chaos.WriteSummary(r.setup.SummaryPath, summary); err != nil {
 			r.logger.Warn().Err(err).Msg("writing chaos summary")
@@ -117,7 +123,7 @@ func (r *chaosRun) finish(ctx context.Context, runErr error, ended bool, upstrea
 	}
 
 	if r.session != nil {
-		r.session.finish(ctx, runErr, upstream)
+		r.session.finish(ctx, runErr, upstream, tools)
 	}
 }
 

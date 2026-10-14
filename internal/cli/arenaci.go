@@ -16,6 +16,7 @@ import (
 	"github.com/gremlyn-ai/gremlyn/internal/arena/chaos"
 	"github.com/gremlyn-ai/gremlyn/internal/arena/gremlins"
 	"github.com/gremlyn-ai/gremlyn/internal/arena/scoring"
+	"github.com/gremlyn-ai/gremlyn/pkg/models"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -40,11 +41,12 @@ type AgentConfig struct {
 }
 
 type MCPServerConfig struct {
-	Name           string            `yaml:"name"`
-	Command        []string          `yaml:"command"`
-	URL            string            `yaml:"url"`
-	Headers        map[string]string `yaml:"headers"`
-	RequestTimeout time.Duration     `yaml:"request_timeout"`
+	Name           string              `yaml:"name"`
+	Command        []string            `yaml:"command"`
+	URL            string              `yaml:"url"`
+	Headers        map[string]string   `yaml:"headers"`
+	RequestTimeout time.Duration       `yaml:"request_timeout"`
+	Annotations    annotationOverrides `yaml:"annotations"`
 }
 
 type ScenarioConfig struct {
@@ -70,6 +72,7 @@ type ScenarioResult struct {
 	Events   int                      `json:"events"`
 	Skipped  int                      `json:"skipped_partial_events"`
 	Upstream chaos.UpstreamStats      `json:"upstream,omitzero"`
+	Tools    models.ToolCatalog       `json:"tools,omitempty"`
 	AgentErr string                   `json:"agent_error,omitempty"`
 	Failures []string                 `json:"failures,omitempty"`
 }
@@ -212,6 +215,9 @@ func validateCIConfig(cfg *CIConfig) error {
 	}
 	if err := validateMCPServer(&cfg.MCPServer, os.LookupEnv); err != nil {
 		return err
+	}
+	if err := chaos.ValidateAnnotationOverrides(cfg.MCPServer.Annotations); err != nil {
+		return fmt.Errorf("mcp_server.annotations: %w", err)
 	}
 	if cfg.MCPServer.URL != "" {
 		resolved, err := resolveUpstream(&cfg.MCPServer, os.LookupEnv)
@@ -360,7 +366,8 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	}
 	res.Coverage = summary.Coverage
 	res.Upstream = summary.Upstream
-	res.Report = scoring.Score(events, nil)
+	res.Tools = summary.Tools
+	res.Report = scoring.Score(chaos.Rescore(events, summary.Tools), nil)
 
 	res.Failures = append(res.Failures, upstreamFailures(res.Upstream)...)
 	res.Failures = append(res.Failures, checkThresholds(cfg.Thresholds, res)...)
@@ -405,6 +412,7 @@ func startScenarioProxy(
 		Intensity:   string(intensityOf(sc)),
 		Params:      sc.Params,
 		Window:      sc.Window,
+		Annotations: srv.Annotations,
 		EventsPath:  eventsPath,
 		SummaryPath: summaryPath,
 	}, logger)
@@ -500,6 +508,13 @@ func writeMCPConfig(path, self string, srv MCPServerConfig, sc ScenarioConfig, s
 
 	if sc.Window > 0 {
 		args = append(args, "--chaos-window", sc.Window.String())
+	}
+	if len(srv.Annotations) > 0 {
+		encoded, err := json.Marshal(srv.Annotations)
+		if err != nil {
+			return fmt.Errorf("encoding tool annotations: %w", err)
+		}
+		args = append(args, "--chaos-annotations", string(encoded))
 	}
 
 	args = append(args, "--")

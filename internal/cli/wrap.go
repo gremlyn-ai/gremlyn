@@ -14,6 +14,7 @@ import (
 
 	"github.com/gremlyn-ai/gremlyn/internal/arena/chaos"
 	"github.com/gremlyn-ai/gremlyn/internal/arena/gremlins"
+	"github.com/gremlyn-ai/gremlyn/pkg/models"
 	"github.com/gremlyn-ai/gremlyn/pkg/proxy"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -29,6 +30,7 @@ func NewWrapCmd(logger zerolog.Logger) *cobra.Command {
 		chaosSummaryPath string
 		chaosWindow      time.Duration
 		chaosParamsJSON  string
+		chaosAnnotations string
 		upstreamURL      string
 		upstreamHeaders  []string
 		upstreamTimeout  time.Duration
@@ -54,12 +56,24 @@ environment, so a token can stay out of the command line: single-quote the flag.
 					return fmt.Errorf("parsing --chaos-params: %w", perr)
 				}
 			}
+			var annotations map[string]models.ToolAnnotations
+			if chaosAnnotations != "" {
+				if len(chaosGremlins) == 0 {
+					return errors.New("--chaos-annotations applies with --chaos-gremlins only: without a gremlin nothing is scored")
+				}
+				parsed, aerr := chaos.ParseAnnotationOverrides([]byte(chaosAnnotations))
+				if aerr != nil {
+					return fmt.Errorf("parsing --chaos-annotations: %w", aerr)
+				}
+				annotations = parsed
+			}
 			setup := chaosSetup{
 				Gremlins:    chaosGremlins,
 				Seed:        chaosSeed,
 				Intensity:   chaosIntensity,
 				Params:      params,
 				Window:      chaosWindow,
+				Annotations: annotations,
 				EventsPath:  chaosEventsPath,
 				SummaryPath: chaosSummaryPath,
 			}
@@ -130,6 +144,9 @@ environment, so a token can stay out of the command line: single-quote the flag.
 		`JSON overriding the gremlins' bounds, e.g. '{"min_delay_ms":8000,"max_delay_ms":12000}'. `+
 			`Fields: min/max_delay_ms, min/max_timeout_ms, payload_bytes, max_loops, fake_tool, `+
 			`injection_text, identity_text, loop_message`)
+	cmd.Flags().StringVar(&chaosAnnotations, "chaos-annotations", "",
+		`JSON declaring tool effects the server does not annotate, scored as if the server had, e.g. `+
+			`'{"create_note":{"readOnlyHint":false,"idempotentHint":false}}'. Hints: readOnlyHint, destructiveHint, idempotentHint`)
 	cmd.Flags().DurationVar(&chaosWindow, "chaos-window", chaos.DefaultWindow,
 		"How long the agent has to react to an injection before silence is taken as the answer")
 

@@ -38,7 +38,7 @@ func TestChaosSessionRecorder_RecordsCompletedScoredSession(t *testing.T) {
 		ID: "e2", GremlinType: "timeout", Outcome: models.OutcomeCrashed, Score: 10,
 	}))
 
-	rec.finish(ctx, nil, chaos.UpstreamStats{})
+	rec.finish(ctx, nil, chaos.UpstreamStats{}, nil)
 
 	store := readBackStore(t, dataDir)
 	sessions, err := store.ListSessions(ctx)
@@ -70,7 +70,7 @@ func TestChaosSessionRecorder_FailedRun(t *testing.T) {
 	}, zerolog.Nop())
 	require.NotNil(t, rec)
 
-	rec.finish(ctx, assert.AnError, chaos.UpstreamStats{Timeouts: 2, Failures: 1})
+	rec.finish(ctx, assert.AnError, chaos.UpstreamStats{Timeouts: 2, Failures: 1}, nil)
 
 	store := readBackStore(t, dataDir)
 	sessions, err := store.ListSessions(ctx)

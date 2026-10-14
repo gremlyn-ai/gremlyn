@@ -73,6 +73,13 @@ func replayCommand(s chaos.SessionSummary) (string, error) {
 		}
 		parts = append(parts, "--chaos-params "+shellArg(string(encoded)))
 	}
+	if overrides := chaos.ConfigOverrides(s.Tools); len(overrides) > 0 {
+		encoded, err := json.Marshal(overrides)
+		if err != nil {
+			return "", fmt.Errorf("encoding tool annotations: %w", err)
+		}
+		parts = append(parts, "--chaos-annotations "+shellArg(string(encoded)))
+	}
 
 	if s.ServerURL != "" {
 		parts = append(parts,

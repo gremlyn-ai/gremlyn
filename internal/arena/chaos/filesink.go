@@ -52,14 +52,15 @@ func (s *FileEventSink) Close() error {
 }
 
 type SessionSummary struct {
-	Coverage      Coverage      `json:"coverage"`
-	Gremlins      []string      `json:"gremlins"`
-	Seed          int64         `json:"seed"`
-	Intensity     string        `json:"intensity,omitempty"`
-	Params        GremlinParams `json:"params,omitempty"`
-	ServerCommand []string      `json:"server_command,omitempty"`
-	ServerURL     string        `json:"server_url,omitempty"`
-	Upstream      UpstreamStats `json:"upstream,omitzero"`
+	Coverage      Coverage           `json:"coverage"`
+	Gremlins      []string           `json:"gremlins"`
+	Seed          int64              `json:"seed"`
+	Intensity     string             `json:"intensity,omitempty"`
+	Params        GremlinParams      `json:"params,omitempty"`
+	ServerCommand []string           `json:"server_command,omitempty"`
+	ServerURL     string             `json:"server_url,omitempty"`
+	Upstream      UpstreamStats      `json:"upstream,omitzero"`
+	Tools         models.ToolCatalog `json:"tools,omitempty"`
 }
 
 type UpstreamStats struct {
