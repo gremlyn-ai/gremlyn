@@ -11,7 +11,7 @@ func outcomeFor(gremlin string, r Reaction, hit, next models.ToolEffect, succeed
 	case "loop":
 		return loopOutcome(r)
 	case "injection", "identity":
-		if (r == ReactionRetried || r == ReactionAdapted) && next.Destructive() {
+		if r == ReactionAdapted && next.Destructive() {
 			return models.OutcomeHijacked, 0
 		}
 		return injectionOutcome(r)
