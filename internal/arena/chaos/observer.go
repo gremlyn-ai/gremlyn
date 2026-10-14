@@ -45,15 +45,17 @@ type watch struct {
 }
 
 type Observer struct {
-	window   time.Duration
-	events   EventSink
-	logger   zerolog.Logger
-	now      func() time.Time
-	mu       sync.Mutex
-	pending  map[string]*watch
-	order    []string
-	injected int
-	observed int
+	window    time.Duration
+	events    EventSink
+	logger    zerolog.Logger
+	now       func() time.Time
+	mu        sync.Mutex
+	pending   map[string]*watch
+	order     []string
+	injected  int
+	observed  int
+	overrides models.ToolCatalog
+	listed    models.ToolCatalog
 }
 
 type ObserverOption func(*Observer)
@@ -66,6 +68,18 @@ func WithObserverClock(now func() time.Time) ObserverOption {
 	return func(o *Observer) { o.now = now }
 }
 
+func WithAnnotationOverrides(tools map[string]models.ToolAnnotations) ObserverOption {
+	return func(o *Observer) {
+		if len(tools) == 0 {
+			return
+		}
+		o.overrides = make(models.ToolCatalog, len(tools))
+		for name, ann := range tools {
+			o.overrides[name] = models.ToolRecord{Annotations: ann, Source: models.AnnotationSourceConfig}
+		}
+	}
+}
+
 const DefaultWindow = 30 * time.Second
 
 func NewObserver(events EventSink, logger zerolog.Logger, opts ...ObserverOption) *Observer {
@@ -75,6 +89,7 @@ func NewObserver(events EventSink, logger zerolog.Logger, opts ...ObserverOption
 		logger:  logger.With().Str("component", "chaos-observer").Logger(),
 		now:     time.Now,
 		pending: make(map[string]*watch),
+		listed:  make(models.ToolCatalog),
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -104,6 +119,8 @@ func (o *Observer) HandleMessage(ctx context.Context, msg *protocol.Message, mct
 }
 
 func (o *Observer) observe(ctx context.Context, msg *protocol.Message, mctx *proxy.MessageContext) {
+	o.recordToolList(msg, mctx)
+
 	isAgentAction := mctx != nil &&
 		mctx.Direction == models.DirectionOutgoing &&
 		msg != nil &&
@@ -128,7 +145,7 @@ func (o *Observer) observe(ctx context.Context, msg *protocol.Message, mctx *pro
 			if w.sawActivity {
 				r = ReactionContinued
 			}
-			resolved = append(resolved, resolution{w.inj, r})
+			resolved = append(resolved, resolution{inj: w.inj, reaction: r})
 			delete(o.pending, id)
 			continue
 		}
@@ -146,10 +163,10 @@ func (o *Observer) observe(ctx context.Context, msg *protocol.Message, mctx *pro
 
 		switch {
 		case method == w.inj.Method && tool != "" && tool == w.tool:
-			resolved = append(resolved, resolution{w.inj, ReactionRetried})
+			resolved = append(resolved, resolution{inj: w.inj, reaction: ReactionRetried, next: tool})
 			delete(o.pending, id)
 		case method == string(protocol.MCPMethodToolsCall):
-			resolved = append(resolved, resolution{w.inj, ReactionAdapted})
+			resolved = append(resolved, resolution{inj: w.inj, reaction: ReactionAdapted, next: tool})
 			delete(o.pending, id)
 		default:
 			w.sawActivity = true
@@ -165,16 +182,18 @@ func (o *Observer) observe(ctx context.Context, msg *protocol.Message, mctx *pro
 	o.order = kept
 
 	o.observed += len(resolved)
+	tools := o.toolsLocked()
 	o.mu.Unlock()
 
 	for _, r := range resolved {
-		o.emit(ctx, r.inj, r.reaction)
+		o.emit(ctx, r, tools)
 	}
 }
 
 type resolution struct {
 	inj      Injection
 	reaction Reaction
+	next     string
 }
 
 func (o *Observer) Finalize(ctx context.Context, ended bool) Coverage {
@@ -192,7 +211,7 @@ func (o *Observer) Finalize(ctx context.Context, ended bool) Coverage {
 				r = ReactionContinued
 			}
 		}
-		resolved = append(resolved, resolution{w.inj, r})
+		resolved = append(resolved, resolution{inj: w.inj, reaction: r})
 		delete(o.pending, id)
 	}
 
@@ -205,6 +224,7 @@ func (o *Observer) Finalize(ctx context.Context, ended bool) Coverage {
 		}
 	}
 	cov := Coverage{Injected: o.injected, Observed: o.observed, Unresolved: unresolved}
+	tools := o.toolsLocked()
 	o.mu.Unlock()
 
 	for _, r := range resolved {
@@ -215,7 +235,7 @@ func (o *Observer) Finalize(ctx context.Context, ended bool) Coverage {
 				Msg("injection left unobserved, excluded from scoring")
 			continue
 		}
-		o.emit(ctx, r.inj, r.reaction)
+		o.emit(ctx, r, tools)
 	}
 
 	return cov
@@ -231,41 +251,153 @@ func (o *Observer) Coverage() Coverage {
 	}
 }
 
-func (o *Observer) emit(ctx context.Context, inj Injection, r Reaction) {
-	outcome, score := outcomeFor(inj.GremlinName, r, models.EffectUnknown, models.EffectUnknown)
+func (o *Observer) Tools() models.ToolCatalog {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.toolsLocked()
+}
 
-	details, err := json.Marshal(map[string]string{
-		"gremlin":  inj.GremlinName,
-		"reaction": string(r),
-		"tool":     toolName(inj.Original),
-		"method":   inj.Method,
-	})
+func (o *Observer) toolsLocked() models.ToolCatalog {
+	out := make(models.ToolCatalog, len(o.listed)+len(o.overrides))
+	for name, rec := range o.listed {
+		out[name] = rec
+	}
+	for name, rec := range o.overrides {
+		out[name] = rec
+	}
+	return out.Clone()
+}
+
+func (o *Observer) recordToolList(msg *protocol.Message, mctx *proxy.MessageContext) {
+	if msg == nil || mctx == nil || mctx.Direction != models.DirectionIncoming ||
+		msg.Type != protocol.MessageTypeResponse || msg.Response == nil || len(msg.Response.Result) == 0 ||
+		mctx.CorrelatedRequest == nil || mctx.CorrelatedRequest.GetMethod() != string(protocol.MCPMethodToolsList) {
+		return
+	}
+	listed, err := parseToolList(msg.Response.Result)
 	if err != nil {
-		o.logger.Warn().Err(err).Msg("marshalling event details")
+		o.logger.Debug().Err(err).Msg("tools/list result not readable, annotations not recorded")
+		return
+	}
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, t := range listed {
+		if !t.annotations.Declared() {
+			delete(o.listed, t.name)
+			continue
+		}
+		o.listed[t.name] = models.ToolRecord{Annotations: t.annotations, Source: models.AnnotationSourceServer}
+	}
+}
+
+type listedTool struct {
+	name        string
+	annotations models.ToolAnnotations
+}
+
+func parseToolList(result json.RawMessage) ([]listedTool, error) {
+	var page struct {
+		Tools []struct {
+			Name        string          `json:"name"`
+			Annotations json.RawMessage `json:"annotations"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(result, &page); err != nil {
+		return nil, fmt.Errorf("decoding tools/list result: %w", err)
+	}
+	out := make([]listedTool, 0, len(page.Tools))
+	for _, t := range page.Tools {
+		if t.Name == "" {
+			continue
+		}
+		var ann models.ToolAnnotations
+		if len(t.Annotations) > 0 && json.Unmarshal(t.Annotations, &ann) != nil {
+			ann = models.ToolAnnotations{}
+		}
+		out = append(out, listedTool{name: t.Name, annotations: ann})
+	}
+	return out, nil
+}
+
+func (o *Observer) emit(ctx context.Context, r resolution, tools models.ToolCatalog) {
+	event, err := resolvedEvent(r.inj, r.reaction, r.next, tools)
+	if err != nil {
+		o.logger.Warn().Err(err).Str("injection", r.inj.ID).Msg("marshalling event details")
 	}
 
 	o.logger.Debug().
-		Str("gremlin", inj.GremlinName).
-		Str("reaction", string(r)).
-		Str("outcome", string(outcome)).
-		Int("score", score).
+		Str("gremlin", r.inj.GremlinName).
+		Str("reaction", string(r.reaction)).
+		Str("outcome", string(event.Outcome)).
+		Int("score", event.Score).
 		Msg("injection resolved")
 
+	if o.events == nil {
+		return
+	}
+	if err := o.events.RecordEvent(ctx, event); err != nil {
+		o.logger.Warn().Err(err).Str("injection", r.inj.ID).Msg("recording arena event")
+	}
+}
+
+func resolvedEvent(inj Injection, r Reaction, next string, tools models.ToolCatalog) (models.ArenaEvent, error) {
+	details := models.EventDetails{
+		Gremlin:  inj.GremlinName,
+		Reaction: string(r),
+		Tool:     inj.Tool,
+		Method:   inj.Method,
+		NextTool: next,
+	}
+	outcome, score := classify(inj.GremlinName, &details, tools)
 	event := models.ArenaEvent{
 		ID:          inj.ID,
 		GremlinType: inj.GremlinName,
 		InjectedAt:  inj.InjectedAt,
 		Outcome:     outcome,
 		Score:       score,
-		Details:     details,
 	}
+	encoded, err := json.Marshal(details)
+	if err != nil {
+		return event, fmt.Errorf("encoding details of %s: %w", inj.ID, err)
+	}
+	event.Details = encoded
+	return event, nil
+}
 
-	if o.events == nil {
-		return
+func classify(gremlin string, d *models.EventDetails, tools models.ToolCatalog) (outcome models.ArenaOutcome, score int) {
+	d.ToolEffect = tools.Effect(d.Tool)
+	next := models.EffectUnknown
+	d.NextEffect = ""
+	if d.NextTool != "" {
+		next = tools.Effect(d.NextTool)
+		d.NextEffect = next
 	}
-	if err := o.events.RecordEvent(ctx, event); err != nil {
-		o.logger.Warn().Err(err).Str("injection", inj.ID).Msg("recording arena event")
+	return outcomeFor(gremlin, Reaction(d.Reaction), d.ToolEffect, next)
+}
+
+func Rescore(events []models.ArenaEvent, tools models.ToolCatalog) []models.ArenaEvent {
+	out := make([]models.ArenaEvent, len(events))
+	for i := range events {
+		e := events[i]
+		out[i] = e
+		if e.Outcome == models.OutcomeUnmeasured || len(e.Details) == 0 {
+			continue
+		}
+		var d models.EventDetails
+		if json.Unmarshal(e.Details, &d) != nil || d.Reaction == "" {
+			continue
+		}
+		outcome, score := classify(e.GremlinType, &d, tools)
+		encoded, err := json.Marshal(d)
+		if err != nil {
+			continue
+		}
+		out[i].Outcome = outcome
+		out[i].Score = score
+		out[i].Details = encoded
 	}
+	return out
 }
 
 func toolName(msg *protocol.Message) string {
