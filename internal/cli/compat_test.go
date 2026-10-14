@@ -50,7 +50,30 @@ func multisets(n, k, from int) [][]int {
 	return out
 }
 
-func reconstructEvents(t *testing.T, gremlin string, ds scoring.DimensionScore) [][]models.ArenaEvent {
+const (
+	demoTool  = "read_graph"
+	otherTool = "search_nodes"
+)
+
+func legacyDetails(t *testing.T, gremlin, reaction string, named bool) json.RawMessage {
+	t.Helper()
+	var v any = map[string]string{"gremlin": gremlin, "reaction": reaction, "tool": "", "method": "tools/call"}
+	if named {
+		d := models.EventDetails{Gremlin: gremlin, Reaction: reaction, Tool: demoTool, Method: "tools/call", ToolSucceeded: true}
+		switch reaction {
+		case "retried":
+			d.NextTool = demoTool
+		case "adapted":
+			d.NextTool = otherTool
+		}
+		v = d
+	}
+	data, err := json.Marshal(v)
+	require.NoError(t, err)
+	return data
+}
+
+func reconstructEvents(t *testing.T, gremlin string, ds scoring.DimensionScore, named bool) [][]models.ArenaEvent {
 	t.Helper()
 	verdicts := legacyVerdicts(gremlin)
 	var found [][]models.ArenaEvent
@@ -69,13 +92,9 @@ func reconstructEvents(t *testing.T, gremlin string, ds scoring.DimensionScore) 
 			case models.OutcomeUnmeasured, models.OutcomeHijacked, models.OutcomeDuplicateWrite:
 			}
 			sum += v.score
-			details, err := json.Marshal(map[string]string{
-				"gremlin": gremlin, "reaction": v.reaction, "tool": "", "method": "tools/call",
-			})
-			require.NoError(t, err)
 			events = append(events, models.ArenaEvent{
 				ID: gremlin + string(rune('a'+i)), GremlinType: gremlin,
-				Outcome: v.outcome, Score: v.score, Details: details,
+				Outcome: v.outcome, Score: v.score, Details: legacyDetails(t, gremlin, v.reaction, named),
 			})
 		}
 		if surv == ds.Survived && degr == ds.Degraded && crash == ds.Crashed &&
@@ -94,6 +113,21 @@ func TestCompat_DemoReportRescoresIdentically(t *testing.T) {
 	unrelated := models.ToolCatalog{
 		"delete_everything": {Annotations: models.ToolAnnotations{DestructiveHint: hint(true)}, Source: models.AnnotationSourceServer},
 	}
+	noWriteHints := models.ToolCatalog{
+		demoTool:  {Annotations: models.ToolAnnotations{OpenWorldHint: hint(true)}, Source: models.AnnotationSourceServer},
+		otherTool: {Source: models.AnnotationSourceServer},
+	}
+	variants := []struct {
+		name  string
+		named bool
+		tools models.ToolCatalog
+	}{
+		{"as the old observer wrote them, no catalog", false, nil},
+		{"as the old observer wrote them, unrelated tools annotated", false, unrelated},
+		{"with the tools named, no catalog", true, nil},
+		{"with the tools named, listed without a write hint", true, noWriteHints},
+		{"with the tools named, plus unrelated tools annotated", true, unrelated},
+	}
 
 	for i := range demo.Scenarios {
 		stored := demo.Scenarios[i]
@@ -102,14 +136,14 @@ func TestCompat_DemoReportRescoresIdentically(t *testing.T) {
 			gremlin := stored.Gremlins[0]
 			dim := scoring.GremlinToDimension[gremlin]
 
-			candidates := reconstructEvents(t, gremlin, stored.Report.Dimensions[dim])
-			require.NotEmpty(t, candidates, "the stored counts must come from some set of observed reactions")
-			require.Len(t, candidates[0], stored.Events)
-
 			want, err := json.Marshal(stored.Report)
 			require.NoError(t, err)
-			for _, events := range candidates {
-				for _, tools := range []models.ToolCatalog{nil, unrelated} {
+			for _, v := range variants {
+				candidates := reconstructEvents(t, gremlin, stored.Report.Dimensions[dim], v.named)
+				require.NotEmpty(t, candidates, "the stored counts must come from some set of observed reactions")
+				require.Len(t, candidates[0], stored.Events)
+				for _, events := range candidates {
+					tools := v.tools
 					got := scoring.Score(chaos.Rescore(events, tools), nil)
 					assert.Zero(t, got.Hijacked)
 					assert.Zero(t, got.DuplicateWrites)
@@ -124,7 +158,7 @@ func TestCompat_DemoReportRescoresIdentically(t *testing.T) {
 					data, err := json.Marshal(got)
 					require.NoError(t, err)
 					assert.JSONEq(t, string(want), string(data),
-						"an unannotated server scores exactly as before; the only new field is the unknown-tool count")
+						"%s: an unannotated server scores exactly as before; the only new field is the unknown-tool count", v.name)
 				}
 			}
 		})
