@@ -261,6 +261,9 @@ func (o *Observer) Tools() models.ToolCatalog {
 }
 
 func (o *Observer) toolsLocked() models.ToolCatalog {
+	if len(o.listed)+len(o.overrides) == 0 {
+		return nil
+	}
 	out := make(models.ToolCatalog, len(o.listed)+len(o.overrides))
 	for name, rec := range o.listed {
 		out[name] = rec
@@ -268,7 +271,7 @@ func (o *Observer) toolsLocked() models.ToolCatalog {
 	for name, rec := range o.overrides {
 		out[name] = rec
 	}
-	return out.Clone()
+	return out
 }
 
 func (o *Observer) recordToolList(msg *protocol.Message, mctx *proxy.MessageContext) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -174,6 +175,31 @@ func TestObserver_ToolsIsACopy(t *testing.T) {
 	tools := o.Tools()
 	delete(tools, "list_notes")
 	assert.Contains(t, o.Tools(), "list_notes")
+}
+
+func TestObserver_ToolsBuildsOneMap(t *testing.T) {
+	assert.Nil(t, newObs(t, newClock(), &memEvents{}).Tools(), "nothing recorded is no catalog")
+
+	o := newObs(t, newClock(), &memEvents{})
+	parts := make([]string, 0, 40)
+	for i := range 40 {
+		parts = append(parts, fmt.Sprintf(`{"name":"t%d","annotations":{"readOnlyHint":true}}`, i))
+	}
+	listTools(t, o, 1, `{"tools":[`+strings.Join(parts, ",")+`]}`)
+	want := o.Tools()
+	require.Len(t, want, 40)
+
+	var built models.ToolCatalog
+	oneMap := testing.AllocsPerRun(50, func() {
+		m := make(models.ToolCatalog, len(want))
+		for name, rec := range want {
+			m[name] = rec
+		}
+		built = m
+	})
+	got := testing.AllocsPerRun(50, func() { built = o.Tools() })
+	assert.LessOrEqual(t, got, oneMap, "the merged catalog is returned as built, not copied a second time")
+	assert.Len(t, built, 40)
 }
 
 func TestObserver_ScoresWithTheEffectOfTheToolsInvolved(t *testing.T) {
