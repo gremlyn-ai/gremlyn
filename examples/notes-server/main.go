@@ -28,7 +28,9 @@ const (
 	maxBody        = 1 << 20
 )
 
-var supportedProtocols = []string{"2025-06-18", "2025-03-26"}
+func supportedProtocols() []string {
+	return []string{"2025-06-18", "2025-03-26"}
+}
 
 type note struct {
 	ID    int    `json:"id"`
@@ -62,33 +64,35 @@ type tool struct {
 	Annotations annotations `json:"annotations"`
 }
 
-var tools = []tool{
-	{
-		Name:        "list_notes",
-		Title:       "List notes",
-		Description: "Lists every note with its id, title and text.",
-		InputSchema: inputSchema{Type: "object", Properties: map[string]property{}},
-		Annotations: annotations{ReadOnlyHint: true},
-	},
-	{
-		Name:        "create_note",
-		Title:       "Create a note",
-		Description: "Creates a new note and returns its id. Each call creates another note.",
-		InputSchema: inputSchema{Type: "object", Properties: map[string]property{
-			"title": {Type: "string", Description: "The note's title"},
-			"body":  {Type: "string", Description: "The note's text"},
-		}, Required: []string{"title", "body"}},
-		Annotations: annotations{IdempotentHint: false},
-	},
-	{
-		Name:        "delete_note",
-		Title:       "Delete a note",
-		Description: "Deletes the note with this id, permanently.",
-		InputSchema: inputSchema{Type: "object", Properties: map[string]property{
-			"id": {Type: "integer", Description: "The id of the note to delete"},
-		}, Required: []string{"id"}},
-		Annotations: annotations{DestructiveHint: true, IdempotentHint: true},
-	},
+func toolList() []tool {
+	return []tool{
+		{
+			Name:        "list_notes",
+			Title:       "List notes",
+			Description: "Lists every note with its id, title and text.",
+			InputSchema: inputSchema{Type: "object", Properties: map[string]property{}},
+			Annotations: annotations{ReadOnlyHint: true},
+		},
+		{
+			Name:        "create_note",
+			Title:       "Create a note",
+			Description: "Creates a new note and returns its id. Each call creates another note.",
+			InputSchema: inputSchema{Type: "object", Properties: map[string]property{
+				"title": {Type: "string", Description: "The note's title"},
+				"body":  {Type: "string", Description: "The note's text"},
+			}, Required: []string{"title", "body"}},
+			Annotations: annotations{IdempotentHint: false},
+		},
+		{
+			Name:        "delete_note",
+			Title:       "Delete a note",
+			Description: "Deletes the note with this id, permanently.",
+			InputSchema: inputSchema{Type: "object", Properties: map[string]property{
+				"id": {Type: "integer", Description: "The id of the note to delete"},
+			}, Required: []string{"id"}},
+			Annotations: annotations{DestructiveHint: true, IdempotentHint: true},
+		},
+	}
 }
 
 type rpcRequest struct {
@@ -214,7 +218,7 @@ func (s *server) handle(req rpcRequest) rpcResponse {
 	case "tools/list":
 		resp.Result = struct {
 			Tools []tool `json:"tools"`
-		}{tools}
+		}{toolList()}
 	case "tools/call":
 		result, rerr := s.call(req.Params)
 		resp.Result, resp.Error = result, rerr
@@ -304,7 +308,7 @@ func initializeResult(params json.RawMessage) initialized {
 	}
 	version := latestProtocol
 	if json.Unmarshal(params, &p) == nil {
-		for _, v := range supportedProtocols {
+		for _, v := range supportedProtocols() {
 			if v == p.ProtocolVersion {
 				version = v
 			}

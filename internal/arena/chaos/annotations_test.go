@@ -65,3 +65,10 @@ func TestConfigOverrides(t *testing.T) {
 	})
 	assert.Equal(t, map[string]models.ToolAnnotations{"b": {DestructiveHint: hint(true)}}, got)
 }
+
+func TestAnnotationHintsIsAFreshCopy(t *testing.T) {
+	hints := AnnotationHints()
+	assert.Equal(t, []string{"readOnlyHint", "destructiveHint", "idempotentHint"}, hints)
+	hints[0] = "mutated"
+	assert.Equal(t, "readOnlyHint", AnnotationHints()[0], "a caller cannot change the rule for everyone")
+}

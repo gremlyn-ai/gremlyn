@@ -196,3 +196,13 @@ func TestListensOnLoopbackOnly(t *testing.T) {
 	assert.NoError(t, run(ctx, "127.0.0.1:0", zerolog.Nop()), "a cancelled context shuts the server down cleanly")
 	assert.Error(t, run(context.Background(), "0.0.0.0:0", zerolog.Nop()))
 }
+
+func TestDefinitionsAreFreshCopies(t *testing.T) {
+	tl := toolList()
+	tl[0].Name = "mutated"
+	assert.Equal(t, "list_notes", toolList()[0].Name)
+
+	pv := supportedProtocols()
+	pv[0] = "mutated"
+	assert.Equal(t, latestProtocol, supportedProtocols()[0])
+}

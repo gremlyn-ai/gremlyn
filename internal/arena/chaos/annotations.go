@@ -11,7 +11,9 @@ import (
 	"github.com/gremlyn-ai/gremlyn/pkg/models"
 )
 
-var AnnotationHints = []string{"readOnlyHint", "destructiveHint", "idempotentHint"}
+func AnnotationHints() []string {
+	return []string{"readOnlyHint", "destructiveHint", "idempotentHint"}
+}
 
 func ValidateAnnotationOverrides(tools map[string]models.ToolAnnotations) error {
 	names := make([]string, 0, len(tools))
@@ -35,7 +37,7 @@ func validateOverride(name string, a models.ToolAnnotations) error {
 		return fmt.Errorf("%s: openWorldHint changes no score, so declaring it would do nothing; remove it", name)
 	}
 	if a.ReadOnlyHint == nil && a.DestructiveHint == nil && a.IdempotentHint == nil {
-		return fmt.Errorf("%s: declare at least one of %s", name, strings.Join(AnnotationHints, ", "))
+		return fmt.Errorf("%s: declare at least one of %s", name, strings.Join(AnnotationHints(), ", "))
 	}
 	if a.ReadOnlyHint != nil && *a.ReadOnlyHint && (a.DestructiveHint != nil || a.IdempotentHint != nil) {
 		return fmt.Errorf("%s: a read-only tool writes nothing, so destructiveHint and idempotentHint do not apply to it", name)

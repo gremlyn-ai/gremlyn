@@ -16,7 +16,7 @@ func (a *annotationOverrides) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("line %d: mcp_server.annotations maps each tool name to its hints", node.Line)
 	}
-	known := append(slices.Clone(chaos.AnnotationHints), "openWorldHint")
+	known := append(chaos.AnnotationHints(), "openWorldHint")
 	out := make(annotationOverrides, len(node.Content)/2)
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		name, body := node.Content[i], node.Content[i+1]
@@ -29,7 +29,7 @@ func (a *annotationOverrides) UnmarshalYAML(node *yaml.Node) error {
 		for j := 0; j+1 < len(body.Content); j += 2 {
 			if key := body.Content[j]; !slices.Contains(known, key.Value) {
 				return fmt.Errorf("line %d: mcp_server.annotations.%s: unknown hint %q (want %s)",
-					key.Line, name.Value, key.Value, strings.Join(chaos.AnnotationHints, ", "))
+					key.Line, name.Value, key.Value, strings.Join(chaos.AnnotationHints(), ", "))
 			}
 		}
 		var ann models.ToolAnnotations
