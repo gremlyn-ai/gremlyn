@@ -102,6 +102,9 @@ Needs no running arena service and no database.
 A scenario in which the agent never called a tool is a FAILURE, not a pass: no tool
 call means no gremlin was crossed and nothing was measured.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := protectProcessEnviron(); err != nil {
+				logger.Warn().Err(err).Msg("could not hide gremlyn's environment from same-user processes")
+			}
 			cfg, err := loadCIConfig(configPath)
 			if err != nil {
 				return err

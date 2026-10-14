@@ -187,6 +187,9 @@ func runStdioWrap(logger zerolog.Logger, serverName string, childCmd []string, s
 }
 
 func runUpstreamWrap(cmd *cobra.Command, logger zerolog.Logger, target upstreamTarget, setup chaosSetup) error {
+	if err := protectProcessEnviron(); err != nil {
+		logger.Warn().Err(err).Msg("could not hide gremlyn's environment from same-user processes")
+	}
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
