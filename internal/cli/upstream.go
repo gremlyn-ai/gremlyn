@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -37,21 +38,37 @@ func resolveUpstream(srv *MCPServerConfig, lookup envLookup) (resolvedUpstream, 
 }
 
 func scrubEnv(environ, vars []string) []string {
+	return scrubEnvFor(runtime.GOOS, environ, vars)
+}
+
+func scrubEnvFor(goos string, environ, vars []string) []string {
 	if len(vars) == 0 {
 		return environ
-	}
-	drop := make(map[string]bool, len(vars))
-	for _, v := range vars {
-		drop[v] = true
 	}
 	out := make([]string, 0, len(environ))
 	for _, kv := range environ {
 		name, _, _ := strings.Cut(kv, "=")
-		if !drop[name] {
+		if !containsEnvName(goos, vars, name) {
 			out = append(out, kv)
 		}
 	}
 	return out
+}
+
+func containsEnvName(goos string, names []string, name string) bool {
+	for _, n := range names {
+		if sameEnvName(goos, n, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameEnvName(goos, a, b string) bool {
+	if goos == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 func resolveHeaders(raw map[string]string, lookup envLookup, used map[string]bool) (map[string]string, error) {
@@ -227,10 +244,19 @@ func validateMCPServer(srv *MCPServerConfig, lookup envLookup) error {
 }
 
 func checkAgentEnv(agentEnv map[string]string, vars []string) error {
-	for _, v := range vars {
-		if _, ok := agentEnv[v]; ok {
+	return checkAgentEnvFor(runtime.GOOS, agentEnv, vars)
+}
+
+func checkAgentEnvFor(goos string, agentEnv map[string]string, vars []string) error {
+	names := make([]string, 0, len(agentEnv))
+	for name := range agentEnv {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if containsEnvName(goos, vars, name) {
 			return fmt.Errorf("agent.env sets %s, which mcp_server reads for its url or headers: "+
-				"the agent never sees those variables", v)
+				"the agent never sees those variables", name)
 		}
 	}
 	return nil

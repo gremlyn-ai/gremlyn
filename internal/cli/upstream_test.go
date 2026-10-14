@@ -103,3 +103,32 @@ func TestResolveURL_RefusesCICredentials(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "CI credential variable")
 }
+
+func TestSameEnvName(t *testing.T) {
+	tests := []struct {
+		goos string
+		a, b string
+		want bool
+	}{
+		{"linux", "ACME_TOKEN", "ACME_TOKEN", true},
+		{"linux", "acme_token", "ACME_TOKEN", false},
+		{"darwin", "Acme_Token", "ACME_TOKEN", false},
+		{"windows", "acme_token", "ACME_TOKEN", true},
+		{"windows", "ACME_TOKEN", "ACME_TOKENS", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos+"/"+tt.a, func(t *testing.T) {
+			assert.Equal(t, tt.want, sameEnvName(tt.goos, tt.a, tt.b))
+		})
+	}
+}
+
+func TestScrubEnvFor_WindowsNamesAreCaseInsensitive(t *testing.T) {
+	environ := []string{"Path=C:\\bin", "ACME_TOKEN=s", "Other=x"}
+	assert.Equal(t, []string{"Path=C:\\bin", "Other=x"}, scrubEnvFor("windows", environ, []string{"acme_token"}),
+		"on Windows ${acme_token} resolves ACME_TOKEN, so the scrub must remove it too")
+	assert.Equal(t, environ, scrubEnvFor("linux", environ, []string{"acme_token"}))
+
+	require.Error(t, checkAgentEnvFor("windows", map[string]string{"Acme_Token": "x"}, []string{"ACME_TOKEN"}))
+	require.NoError(t, checkAgentEnvFor("linux", map[string]string{"Acme_Token": "x"}, []string{"ACME_TOKEN"}))
+}
