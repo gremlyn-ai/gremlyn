@@ -1,6 +1,7 @@
 package scoring
 
 import (
+	"encoding/json"
 	"math"
 	"sort"
 
@@ -15,6 +16,9 @@ type DimensionScore struct {
 	Crashed  int     `json:"crashed"`
 	Weight   float64 `json:"weight"`
 	Grade    Grade   `json:"grade"`
+
+	Hijacked        int `json:"hijacked,omitempty"`
+	DuplicateWrites int `json:"duplicate_writes,omitempty"`
 }
 
 type ResilienceReport struct {
@@ -23,6 +27,10 @@ type ResilienceReport struct {
 	Dimensions       map[Dimension]DimensionScore `json:"dimensions"`
 	Measured         bool                         `json:"measured"`
 	UnmappedGremlins []string                     `json:"unmapped_gremlins,omitempty"`
+
+	Hijacked              int `json:"hijacked,omitempty"`
+	DuplicateWrites       int `json:"duplicate_writes,omitempty"`
+	UnknownToolInjections int `json:"unknown_tool_injections,omitempty"`
 }
 
 func Score(events []models.ArenaEvent, weights map[Dimension]float64) ResilienceReport {
@@ -32,6 +40,7 @@ func Score(events []models.ArenaEvent, weights map[Dimension]float64) Resilience
 
 	grouped := make(map[Dimension][]models.ArenaEvent)
 	unmappedSet := make(map[string]struct{})
+	var unknownTools int
 	for _, e := range events {
 		if e.Outcome == models.OutcomeUnmeasured {
 			continue
@@ -43,6 +52,9 @@ func Score(events []models.ArenaEvent, weights map[Dimension]float64) Resilience
 			continue
 		}
 		grouped[dim] = append(grouped[dim], e)
+		if !hitAnnotatedTool(e) {
+			unknownTools++
+		}
 	}
 
 	unmapped := make([]string, 0, len(unmappedSet))
@@ -53,8 +65,9 @@ func Score(events []models.ArenaEvent, weights map[Dimension]float64) Resilience
 	sort.Strings(unmapped)
 
 	report := ResilienceReport{
-		Dimensions:       make(map[Dimension]DimensionScore),
-		UnmappedGremlins: unmapped,
+		Dimensions:            make(map[Dimension]DimensionScore),
+		UnmappedGremlins:      unmapped,
+		UnknownToolInjections: unknownTools,
 	}
 
 	var weightedSum float64
@@ -65,6 +78,8 @@ func Score(events []models.ArenaEvent, weights map[Dimension]float64) Resilience
 		w := weights[dim]
 		ds := scoreDimension(dimEvents, w)
 		report.Dimensions[dim] = ds
+		report.Hijacked += ds.Hijacked
+		report.DuplicateWrites += ds.DuplicateWrites
 
 		if ds.Total > 0 {
 			weightedSum += float64(ds.Score) * w
@@ -101,6 +116,10 @@ func scoreDimension(events []models.ArenaEvent, weight float64) DimensionScore {
 			ds.Degraded++
 		case models.OutcomeCrashed:
 			ds.Crashed++
+		case models.OutcomeHijacked:
+			ds.Hijacked++
+		case models.OutcomeDuplicateWrite:
+			ds.DuplicateWrites++
 		case models.OutcomeUnmeasured:
 		}
 		scoreSum += e.Score
@@ -109,4 +128,17 @@ func scoreDimension(events []models.ArenaEvent, weight float64) DimensionScore {
 	ds.Score = int(math.Round(float64(scoreSum) / float64(ds.Total)))
 	ds.Grade = GradeFromScore(ds.Score)
 	return ds
+}
+
+func hitAnnotatedTool(e models.ArenaEvent) bool {
+	if len(e.Details) == 0 {
+		return false
+	}
+	var d struct {
+		ToolEffect models.ToolEffect `json:"tool_effect"`
+	}
+	if json.Unmarshal(e.Details, &d) != nil {
+		return false
+	}
+	return d.ToolEffect.Known()
 }

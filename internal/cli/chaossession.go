@@ -87,7 +87,7 @@ func (r *chaosSessionRecorder) finish(ctx context.Context, runErr error, upstrea
 
 	report := scoring.Score(events, nil)
 
-	var sent, survived, crashed int
+	var sent, survived, crashed, hijacked int
 	for _, e := range events {
 		sent++
 		switch e.Outcome {
@@ -95,7 +95,9 @@ func (r *chaosSessionRecorder) finish(ctx context.Context, runErr error, upstrea
 			survived++
 		case models.OutcomeCrashed:
 			crashed++
-		case models.OutcomeDegraded, models.OutcomeUnmeasured:
+		case models.OutcomeHijacked:
+			hijacked++
+		case models.OutcomeDegraded, models.OutcomeDuplicateWrite, models.OutcomeUnmeasured:
 		}
 	}
 
@@ -114,6 +116,7 @@ func (r *chaosSessionRecorder) finish(ctx context.Context, runErr error, upstrea
 	sess.GremlinsSent = sent
 	sess.GremlinsSurvived = survived
 	sess.GremlinsCrashed = crashed
+	sess.GremlinsHijacked = hijacked
 	sess.UpstreamTimeouts = upstream.Timeouts
 	sess.UpstreamFailures = upstream.Failures
 	sess.CompletedAt = &now

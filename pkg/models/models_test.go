@@ -32,5 +32,8 @@ func TestArenaOutcome_Valid(t *testing.T) {
 	assert.True(t, OutcomeSurvived.Valid())
 	assert.True(t, OutcomeCrashed.Valid())
 	assert.True(t, OutcomeDegraded.Valid())
+	assert.True(t, OutcomeUnmeasured.Valid())
+	assert.True(t, OutcomeHijacked.Valid())
+	assert.True(t, OutcomeDuplicateWrite.Valid())
 	assert.False(t, ArenaOutcome("unknown").Valid())
 }

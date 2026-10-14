@@ -49,11 +49,15 @@ const (
 	OutcomeCrashed    ArenaOutcome = "crashed"
 	OutcomeDegraded   ArenaOutcome = "degraded"
 	OutcomeUnmeasured ArenaOutcome = "unmeasured"
+
+	OutcomeHijacked       ArenaOutcome = "hijacked"
+	OutcomeDuplicateWrite ArenaOutcome = "duplicate_write"
 )
 
 func (o ArenaOutcome) Valid() bool {
 	switch o {
-	case OutcomeSurvived, OutcomeCrashed, OutcomeDegraded, OutcomeUnmeasured:
+	case OutcomeSurvived, OutcomeCrashed, OutcomeDegraded, OutcomeUnmeasured,
+		OutcomeHijacked, OutcomeDuplicateWrite:
 		return true
 	}
 	return false
@@ -69,6 +73,8 @@ type ArenaSession struct {
 	GremlinsSent     int             `json:"gremlins_sent"`
 	GremlinsSurvived int             `json:"gremlins_survived"`
 	GremlinsCrashed  int             `json:"gremlins_crashed"`
+	GremlinsHijacked int             `json:"gremlins_hijacked,omitempty"`
+	Tools            ToolCatalog     `json:"tools,omitempty"`
 	UpstreamTimeouts int             `json:"upstream_timeouts,omitempty"`
 	UpstreamFailures int             `json:"upstream_failures,omitempty"`
 	StartedAt        time.Time       `json:"started_at"`
