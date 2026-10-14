@@ -167,7 +167,7 @@ which returns a decision: pass, modify, redact or block. Stages run in priority 
 
 | Priority | Stage | Role |
 |---|---|---|
-| 50 | Arena observer | records what the agent did after an injection |
+| 50 | Arena observer | records what the agent did after an injection, and reads the tool annotations in `tools/list` |
 | 100 | Arena gremlins | mutate at most one tool exchange |
 
 The order is a contract. The observer runs first so it sees what the agent sent, not what a
