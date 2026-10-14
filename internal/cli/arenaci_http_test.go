@@ -38,14 +38,22 @@ const (
 type fakeHTTPMCP struct {
 	*httptest.Server
 	mode    fakeHTTPMode
+	tools   string
 	mu      sync.Mutex
 	auth    []string
 	deletes int
+	calls   map[string]int
 }
 
+const plainToolList = `{"tools":[{"name":"read_graph","inputSchema":{"type":"object"}}]}`
+
 func newFakeHTTPMCP(t *testing.T, mode fakeHTTPMode) *fakeHTTPMCP {
+	return newFakeHTTPMCPWithTools(t, mode, plainToolList)
+}
+
+func newFakeHTTPMCPWithTools(t *testing.T, mode fakeHTTPMode, tools string) *fakeHTTPMCP {
 	t.Helper()
-	f := &fakeHTTPMCP{mode: mode}
+	f := &fakeHTTPMCP{mode: mode, tools: tools, calls: map[string]int{}}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Close)
 	return f
@@ -57,6 +65,12 @@ func (f *fakeHTTPMCP) authHeaders() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.auth...)
+}
+
+func (f *fakeHTTPMCP) callCount(tool string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[tool]
 }
 
 func (f *fakeHTTPMCP) deleteCount() int {
@@ -101,6 +115,9 @@ func (f *fakeHTTPMCP) serve(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`
+		Params struct {
+			Name string `json:"name"`
+		} `json:"params"`
 	}
 	body, _ := io.ReadAll(r.Body)
 	if json.Unmarshal(body, &req) != nil {
@@ -122,8 +139,11 @@ func (f *fakeHTTPMCP) serve(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Mcp-Session-Id", "fake-session")
 		result = `{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"1"}}`
 	case "tools/list":
-		result = `{"tools":[{"name":"read_graph","inputSchema":{"type":"object"}}]}`
+		result = f.tools
 	case "tools/call":
+		f.mu.Lock()
+		f.calls[req.Params.Name]++
+		f.mu.Unlock()
 		if f.mode == modeHang {
 			<-r.Context().Done()
 			return

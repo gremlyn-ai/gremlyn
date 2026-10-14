@@ -41,7 +41,10 @@ type rpc struct {
 }
 
 func main() {
-	mode := flag.String("mode", "robust", "robust or fragile")
+	mode := flag.String("mode", "robust",
+		"robust (retries a bad result), fragile (accepts it), obedient (follows an instruction found in a result "+
+			"by calling --then-tool) or checker (answers a bad result by calling --then-tool instead of retrying)")
+	thenTool := flag.String("then-tool", "", "the tool an obedient or checker agent calls next")
 	cfgPath := flag.String("mcp-config", "", "path to the MCP client config")
 	tool := flag.String("tool", "read_graph", "tool to call")
 	retries := flag.Int("retries", 1, "how many times a robust agent retries")
@@ -58,13 +61,13 @@ func main() {
 		}
 	}
 
-	if err := run(*mode, *cfgPath, *tool, *expect, *retries); err != nil {
+	if err := run(*mode, *cfgPath, *tool, *thenTool, *expect, *retries); err != nil {
 		fmt.Fprintf(os.Stderr, "refagent: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(mode, cfgPath, tool, expectKey string, retries int) error {
+func run(mode, cfgPath, tool, thenTool, expectKey string, retries int) error {
 	if cfgPath == "" {
 		return fmt.Errorf("--mcp-config is required")
 	}
@@ -127,20 +130,23 @@ func run(mode, cfgPath, tool, expectKey string, retries int) error {
 		return fmt.Errorf("tools/list: %w", err)
 	}
 
+	call := func(name string) (*rpc, error) {
+		if err := send(rpc{ID: next(), Method: "tools/call", Params: map[string]any{
+			"name":      name,
+			"arguments": map[string]any{},
+		}}); err != nil {
+			return nil, err
+		}
+		return read()
+	}
+
 	attempts := 1
 	if mode == "robust" {
 		attempts += retries
 	}
 
 	for attempt := range attempts {
-		if err := send(rpc{ID: next(), Method: "tools/call", Params: map[string]any{
-			"name":      tool,
-			"arguments": map[string]any{},
-		}}); err != nil {
-			return err
-		}
-
-		resp, err := read()
+		resp, err := call(tool)
 		if err != nil {
 			if mode == "robust" && attempt < attempts-1 {
 				continue
@@ -148,7 +154,15 @@ func run(mode, cfgPath, tool, expectKey string, retries int) error {
 			return nil
 		}
 
+		if mode == "obedient" && carriesInstruction(resp) {
+			_, _ = call(thenTool)
+			return nil
+		}
 		if !suspicious(resp, expectKey) {
+			return nil
+		}
+		if mode == "checker" {
+			_, _ = call(thenTool)
 			return nil
 		}
 		if mode != "robust" {
@@ -156,6 +170,15 @@ func run(mode, cfgPath, tool, expectKey string, retries int) error {
 		}
 	}
 	return nil
+}
+
+func carriesInstruction(m *rpc) bool {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(m.Result, &obj) != nil {
+		return false
+	}
+	_, ok := obj["_system_note"]
+	return ok
 }
 
 func suspicious(m *rpc, expectKey string) bool {
