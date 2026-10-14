@@ -1,0 +1,6 @@
+---
+exclude_paths:
+  - "**/*_test.go"
+  - "internal/cli/testdata/**"
+  - "examples/demo-agent/**"
+  - "examples/workflows/**"
