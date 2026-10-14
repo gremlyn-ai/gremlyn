@@ -44,6 +44,14 @@ func TestParseAnnotationOverrides(t *testing.T) {
 	assert.Equal(t, models.EffectNonIdempotentWrite, got["create_note"].Effect())
 
 	for _, bad := range []string{
+		`{"create_note":{"readonlyhint":false,"idempotentHint":false}}`,
+		`{"create_note":{"IdempotentHint":false}}`,
+		`{"create_note":{"idempotentHint":false}}}`,
+		`{"create_note":{"idempotentHint":false}}]`,
+		`null`,
+		`{"create_note":null}`,
+		`{"create_note":{"idempotentHint":null}}`,
+		`{"create_note":{"idempotentHint":false,"readOnlyHint":null}}`,
 		`{"create_note":{"idempotent":false,"readOnlyHint":false}}`,
 		`{"create_note":{"idempotentHint":"no"}}`,
 		`{"create_note":{}}`,

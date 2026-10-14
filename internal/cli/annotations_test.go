@@ -64,6 +64,16 @@ func TestLoadCIConfig_AnnotationOverrides(t *testing.T) {
     create_note: write`, "must map hints to true or false"},
 		{"a hint that is not a boolean", `  annotations:
     create_note: {readOnlyHint: maybe}`, "create_note"},
+		{"a hint in the wrong case", `  annotations:
+    create_note: {idempotenthint: false}`, `unknown hint "idempotenthint"`},
+		{"a null hint", `  annotations:
+    create_note: {idempotentHint: false, readOnlyHint: null}`, "readOnlyHint must be true or false"},
+		{"a tilde hint", `  annotations:
+    create_note: {idempotentHint: ~}`, "idempotentHint must be true or false"},
+		{"a quoted boolean", `  annotations:
+    create_note: {idempotentHint: "false"}`, "idempotentHint must be true or false"},
+		{"a null entry", `  annotations:
+    create_note:`, "must map hints to true or false"},
 		{"read-only and destructive", `  annotations:
     list_notes: {readOnlyHint: true, destructiveHint: true}`, "a read-only tool writes nothing"},
 	}

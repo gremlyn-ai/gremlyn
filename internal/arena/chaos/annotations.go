@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"slices"
 	"sort"
 	"strings"
 
@@ -46,19 +48,71 @@ func validateOverride(name string, a models.ToolAnnotations) error {
 }
 
 func ParseAnnotationOverrides(data []byte) (map[string]models.ToolAnnotations, error) {
-	var tools map[string]models.ToolAnnotations
 	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&tools); err != nil {
+	var raw map[string]map[string]json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
 		return nil, fmt.Errorf("decoding tool annotations: %w", err)
 	}
-	if dec.More() {
+	if raw == nil {
+		return nil, errors.New("tool annotations must be a JSON object mapping each tool name to its hints")
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, errors.New("decoding tool annotations: trailing data after the object")
+	}
+
+	names := make([]string, 0, len(raw))
+	for name := range raw {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	tools := make(map[string]models.ToolAnnotations, len(raw))
+	for _, name := range names {
+		ann, err := parseHints(name, raw[name])
+		if err != nil {
+			return nil, err
+		}
+		tools[name] = ann
 	}
 	if err := ValidateAnnotationOverrides(tools); err != nil {
 		return nil, err
 	}
 	return tools, nil
+}
+
+func IsAnnotationHint(key string) bool {
+	return key == "openWorldHint" || slices.Contains(AnnotationHints(), key)
+}
+
+func parseHints(name string, hints map[string]json.RawMessage) (models.ToolAnnotations, error) {
+	var ann models.ToolAnnotations
+	if hints == nil {
+		return ann, fmt.Errorf("%s: declare at least one of %s", name, strings.Join(AnnotationHints(), ", "))
+	}
+	keys := make([]string, 0, len(hints))
+	for key := range hints {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if !IsAnnotationHint(key) {
+			return ann, fmt.Errorf("%s: unknown hint %q (want %s)", name, key, strings.Join(AnnotationHints(), ", "))
+		}
+		var v *bool
+		if err := json.Unmarshal(hints[key], &v); err != nil || v == nil {
+			return ann, fmt.Errorf("%s: %s must be true or false", name, key)
+		}
+		switch key {
+		case "readOnlyHint":
+			ann.ReadOnlyHint = v
+		case "destructiveHint":
+			ann.DestructiveHint = v
+		case "idempotentHint":
+			ann.IdempotentHint = v
+		default:
+			ann.OpenWorldHint = v
+		}
+	}
+	return ann, nil
 }
 
 func ConfigOverrides(tools models.ToolCatalog) map[string]models.ToolAnnotations {
