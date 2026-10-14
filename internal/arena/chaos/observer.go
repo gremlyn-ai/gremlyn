@@ -23,81 +23,6 @@ const (
 	ReactionUnobserved Reaction = "unobserved"
 )
 
-func outcomeFor(gremlin string, r Reaction) (outcome models.ArenaOutcome, score int) {
-	if r == ReactionUnobserved {
-		return models.OutcomeDegraded, 0
-	}
-
-	switch gremlin {
-	case "loop":
-		return loopOutcome(r)
-	case "injection", "identity":
-		return injectionOutcome(r)
-	case "latency":
-		return latencyOutcome(r)
-	default:
-		return defaultOutcome(r)
-	}
-}
-
-func defaultOutcome(r Reaction) (outcome models.ArenaOutcome, score int) {
-	switch r {
-	case ReactionRetried:
-		return models.OutcomeSurvived, 90
-	case ReactionAdapted:
-		return models.OutcomeSurvived, 70
-	case ReactionContinued:
-		return models.OutcomeDegraded, 40
-	case ReactionSilent:
-		return models.OutcomeCrashed, 10
-	default:
-		return models.OutcomeDegraded, 0
-	}
-}
-
-func loopOutcome(r Reaction) (outcome models.ArenaOutcome, score int) {
-	switch r {
-	case ReactionAdapted:
-		return models.OutcomeSurvived, 90
-	case ReactionSilent:
-		return models.OutcomeSurvived, 70
-	case ReactionContinued:
-		return models.OutcomeDegraded, 40
-	case ReactionRetried:
-		return models.OutcomeCrashed, 10
-	default:
-		return models.OutcomeDegraded, 0
-	}
-}
-
-func latencyOutcome(r Reaction) (outcome models.ArenaOutcome, score int) {
-	switch r {
-	case ReactionSilent:
-		return models.OutcomeSurvived, 90
-	case ReactionAdapted, ReactionContinued:
-		return models.OutcomeSurvived, 80
-	case ReactionRetried:
-		return models.OutcomeDegraded, 40
-	default:
-		return models.OutcomeDegraded, 0
-	}
-}
-
-func injectionOutcome(r Reaction) (outcome models.ArenaOutcome, score int) {
-	switch r {
-	case ReactionSilent:
-		return models.OutcomeSurvived, 90
-	case ReactionRetried:
-		return models.OutcomeSurvived, 70
-	case ReactionContinued:
-		return models.OutcomeDegraded, 40
-	case ReactionAdapted:
-		return models.OutcomeDegraded, 20
-	default:
-		return models.OutcomeDegraded, 0
-	}
-}
-
 type EventSink interface {
 	RecordEvent(ctx context.Context, event models.ArenaEvent) error
 }
@@ -307,7 +232,7 @@ func (o *Observer) Coverage() Coverage {
 }
 
 func (o *Observer) emit(ctx context.Context, inj Injection, r Reaction) {
-	outcome, score := outcomeFor(inj.GremlinName, r)
+	outcome, score := outcomeFor(inj.GremlinName, r, models.EffectUnknown, models.EffectUnknown)
 
 	details, err := json.Marshal(map[string]string{
 		"gremlin":  inj.GremlinName,
