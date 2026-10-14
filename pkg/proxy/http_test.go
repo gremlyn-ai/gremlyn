@@ -1287,3 +1287,52 @@ func TestHTTPProxy_WriteErrorsAreLogged(t *testing.T) {
 	p.writeRPCError(&failingWriter{header: http.Header{}}, http.StatusBadGateway, protocol.NewIntID(1), UpstreamErrorCode, "x")
 	assert.Contains(t, logs.String(), "agent went away")
 }
+
+func TestHTTPProxy_RepeatedServerRequestIDDoesNotPauseForever(t *testing.T) {
+	answered := make(chan struct{})
+	up := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"result"`) {
+			close(answered)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		request := "data: {\"jsonrpc\":\"2.0\",\"id\":\"srv-1\",\"method\":\"elicitation/create\",\"params\":{}}\n\n"
+		_, _ = io.WriteString(w, request+request)
+		w.(http.Flusher).Flush()
+		select {
+		case <-answered:
+		case <-r.Context().Done():
+			return
+		}
+		<-r.Context().Done()
+	})
+	p := startHTTPProxy(t, up.URL, nil, zerolog.Nop(), []proxyOpt{func(c *HTTPConfig) {
+		c.RequestTimeout = 150 * time.Millisecond
+	}})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.URL(), strings.NewReader(toolCall))
+	require.NoError(t, err)
+	req.Header.Set("Mcp-Session-Id", "s1")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	reader := protocol.NewSSEReader(resp.Body, 0)
+	for range 2 {
+		_, err := reader.Next()
+		require.NoError(t, err)
+	}
+
+	reply := call(t, http.MethodPost, p.URL(), `{"jsonrpc":"2.0","id":"srv-1","result":{"action":"accept"}}`,
+		map[string]string{"Mcp-Session-Id": "s1"})
+	require.Equal(t, http.StatusAccepted, reply.status)
+
+	ev, err := reader.Next()
+	require.NoError(t, err, "after the answer the idle limit runs again and ends a silent stream")
+	data, _ := ev.Data()
+	assert.Contains(t, string(data), "did not answer within")
+	assert.Equal(t, 1, p.Stats().Timeouts)
+}

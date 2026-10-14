@@ -859,10 +859,12 @@ func (h *HTTPProxy) relaySSE(w http.ResponseWriter, r *http.Request, resp *http.
 		}
 		if dog != nil && out != nil && isRequest(msg) {
 			key := correlationKey{session: session, id: msg.Request.ID.String()}
-			var once sync.Once
-			dog.pause()
-			h.awaiting.Store(key, func() { once.Do(dog.resume) })
-			awaited = append(awaited, key)
+			if _, pending := h.awaiting.Load(key); !pending {
+				var once sync.Once
+				dog.pause()
+				h.awaiting.Store(key, func() { once.Do(dog.resume) })
+				awaited = append(awaited, key)
+			}
 		}
 		if out == nil {
 			continue
