@@ -126,8 +126,13 @@ Header values, and a URL path that may carry a key, are secrets. They live in th
 process only:
 
 - the MCP config handed to the agent points at the local proxy and holds no header;
-- the variables the `url` and the headers read are removed from the agent's environment, and
-  `agent.env` may not set them, so the agent process never sees the token;
+- the variables the `url` and the headers read are removed from the agent's own environment,
+  and `agent.env` may not set them. That is not a sandbox: an agent with shell access, running
+  as the same user, can still read the environment of its parent processes, and the shell
+  that started `gremlyn` still holds the token. On Linux, `arena ci` and `wrap --upstream`
+  mark themselves non-dumpable (`prctl(PR_SET_DUMPABLE, 0)`), so a same-user process cannot
+  read gremlyn's own `/proc/<pid>/environ`; the parent shell's stays readable. Do not give the
+  agent under test a shell, or run it in a sandbox, when its token matters;
 - the recorded server is the URL's scheme and host only, `https://host/…`, in `session.json`,
   `summary.json`, the logs, `wrap`'s stderr and `arena replay`;
 - nothing in the logs, `mcp.json`, `session.json`, `events.jsonl`, `summary.json`, the report

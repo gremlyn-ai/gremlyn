@@ -224,7 +224,8 @@ mcp_server:
 
 Gremlyn starts a proxy on `127.0.0.1` for the run and hands the agent that local URL; the
 headers stay in the gremlyn process, are never written to a file, a log or the report, and
-the variables they read are removed from the agent's environment. `${VAR}` is the only
+the variables they read are removed from the agent's environment (an agent with a shell
+can still read its parent's, so do not give it one). `${VAR}` is the only
 expansion, in the headers and the `url`, and an unset variable stops the run before it starts.
 The `url` is `https`, or `http` on a loopback address. Use a test account: the agent calls
 real tools with that token. A full file is in
