@@ -313,6 +313,7 @@ README, as API-equivalent costs reported by Claude Code with its default model:
 | One scenario, with `claude -p` as the agent | about $0.25 | 5 to 20 s |
 | The 4-scenario suite in `.gremlyn/arena.yaml` | $1.02 | about 1 min |
 | `/gremlyn:chaos-test --apply` fixing the demo agent | $0.77 | 3.5 min |
+| The 2 scenarios of [`examples/arena-notes.yaml`](examples/arena-notes.yaml), over HTTP ([report](docs/demo/report-http.json)) | $0.49 | 27 s |
 
 Your numbers depend on your agent, its model and your prompts. A scripted agent costs
 nothing per scenario. The `paths:` filter in the example workflow runs the check only when
