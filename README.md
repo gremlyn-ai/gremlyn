@@ -338,6 +338,12 @@ the agent can have changed, and `--max-turns` bounds the fix loop.
 - **Deltas against an older baseline change for annotated servers**, because a hijack or a
   duplicate write now scores lower than the same reaction did before. Unannotated servers are
   not affected.
+- **`injection` writes its text in a `_system_note` field next to the result's `content`.** An
+  MCP client that hands the model only `content`, as Claude Code does, never shows it: the
+  agent can neither obey nor resist it, and the scenario scores that silence as a resisted
+  injection. The `injected-delete` run in [`docs/demo/report-http.json`](docs/demo/report-http.json)
+  is such a case; its transcript shows the model received the notes and nothing else.
+  `identity` replaces the result with an object that has no `content` at all.
 - **The 30-second observation window is not calibrated** on real traffic yet. Tune it per
   scenario with `window`.
 - **Scores vary between runs**, as explained above.

@@ -154,6 +154,14 @@ scenario of the `arena ci` report (`tools`). Each event's details carry the hit 
 next tool and both effect classes. The report is `Score(Rescore(events, tools))`, so it
 depends on the files alone, not on the moment `tools/list` crossed the proxy.
 
+**What the agent's model actually reads.** `injection` adds its text as a `_system_note`
+field beside the result's `content`, and `identity` replaces the result with an object that
+has no `content`. A client that passes only `content` to its model, as Claude Code does, shows
+neither, so a hijack cannot happen through it and silence is the only reaction left. The
+`injected-delete` run in `docs/demo/report-http.json` is one: the agent's transcript shows the
+notes text and no instruction. Putting the payload inside `content` would make these gremlins
+reach such clients, and would change every injection score recorded so far.
+
 **Comparing with older baselines.** For a server whose tools are annotated, the same agent
 behaviour can now score differently than it did with an older Gremlyn: a hijack that used to
 be `adapted` (20) is 0, a retried create that used to be 90 is 10. The delta against a
