@@ -158,6 +158,12 @@ func TestExampleNotesServer_EndToEnd(t *testing.T) {
 	assert.Equal(t, before+2, countNotes(t, url), "the timeout held the answer, not the call: the server holds the note twice")
 
 	before = countNotes(t, url)
+	rejected := run("timeout-on-create", "--mode", "robust", "--tool", "create_note")
+	assert.Equal(t, before, countNotes(t, url), "a create without a title is rejected and writes nothing")
+	assert.Zero(t, rejected.Report.DuplicateWrites, "retrying a rejected write is not a duplicate write")
+	assert.Greater(t, rejected.Report.Overall, duplicated.Report.Overall)
+
+	before = countNotes(t, url)
 	checked := run("timeout-on-create", "--mode", "checker", "--tool", "create_note", "--then-tool", "list_notes", "--args", groceries)
 	assert.Zero(t, checked.Report.DuplicateWrites)
 	assert.Equal(t, before+1, countNotes(t, url))

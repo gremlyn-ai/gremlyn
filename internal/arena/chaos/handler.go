@@ -2,6 +2,7 @@ package chaos
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -100,6 +101,7 @@ func (h *GremlinHandler) record(name string, original, modified *protocol.Messag
 		RequestID:   messageID(original),
 		Method:      correlatedMethod(original, mctx),
 		Tool:        correlatedTool(original, mctx),
+		Succeeded:   succeeded(original),
 		InjectedAt:  h.now(),
 		Original:    original,
 		Modified:    modified,
@@ -113,6 +115,20 @@ func isToolCall(msg *protocol.Message, mctx *proxy.MessageContext) bool {
 	}
 	return mctx != nil && mctx.CorrelatedRequest != nil &&
 		mctx.CorrelatedRequest.GetMethod() == toolCallMethod
+}
+
+func succeeded(msg *protocol.Message) bool {
+	if msg == nil || msg.Type != protocol.MessageTypeResponse || msg.Response == nil ||
+		msg.Response.Error != nil || len(msg.Response.Result) == 0 {
+		return false
+	}
+	var result struct {
+		IsError bool `json:"isError"`
+	}
+	if json.Unmarshal(msg.Response.Result, &result) != nil {
+		return true
+	}
+	return !result.IsError
 }
 
 func messageID(msg *protocol.Message) string {

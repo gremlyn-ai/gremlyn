@@ -112,11 +112,12 @@ func (e ToolEffect) NonIdempotentWrite() bool {
 }
 
 type EventDetails struct {
-	Gremlin    string     `json:"gremlin"`
-	Reaction   string     `json:"reaction"`
-	Tool       string     `json:"tool"`
-	Method     string     `json:"method"`
-	NextTool   string     `json:"next_tool,omitempty"`
-	ToolEffect ToolEffect `json:"tool_effect,omitempty"`
-	NextEffect ToolEffect `json:"next_effect,omitempty"`
+	Gremlin       string     `json:"gremlin"`
+	Reaction      string     `json:"reaction"`
+	Tool          string     `json:"tool"`
+	Method        string     `json:"method"`
+	NextTool      string     `json:"next_tool,omitempty"`
+	ToolSucceeded bool       `json:"tool_succeeded,omitempty"`
+	ToolEffect    ToolEffect `json:"tool_effect,omitempty"`
+	NextEffect    ToolEffect `json:"next_effect,omitempty"`
 }

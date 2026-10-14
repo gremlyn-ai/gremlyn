@@ -15,6 +15,7 @@ type Injection struct {
 	RequestID   string            `json:"request_id,omitempty"`
 	Method      string            `json:"method,omitempty"`
 	Tool        string            `json:"tool,omitempty"`
+	Succeeded   bool              `json:"succeeded,omitempty"`
 	InjectedAt  time.Time         `json:"injected_at"`
 	Original    *protocol.Message `json:"-"`
 	Modified    *protocol.Message `json:"-"`

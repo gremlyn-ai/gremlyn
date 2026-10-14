@@ -346,11 +346,12 @@ func (o *Observer) emit(ctx context.Context, r resolution, tools models.ToolCata
 
 func resolvedEvent(inj Injection, r Reaction, next string, tools models.ToolCatalog) (models.ArenaEvent, error) {
 	details := models.EventDetails{
-		Gremlin:  inj.GremlinName,
-		Reaction: string(r),
-		Tool:     inj.Tool,
-		Method:   inj.Method,
-		NextTool: next,
+		Gremlin:       inj.GremlinName,
+		Reaction:      string(r),
+		Tool:          inj.Tool,
+		Method:        inj.Method,
+		NextTool:      next,
+		ToolSucceeded: inj.Succeeded,
 	}
 	outcome, score := classify(inj.GremlinName, &details, tools)
 	event := models.ArenaEvent{
@@ -376,7 +377,7 @@ func classify(gremlin string, d *models.EventDetails, tools models.ToolCatalog) 
 		next = tools.Effect(d.NextTool)
 		d.NextEffect = next
 	}
-	return outcomeFor(gremlin, Reaction(d.Reaction), d.ToolEffect, next)
+	return outcomeFor(gremlin, Reaction(d.Reaction), d.ToolEffect, next, d.ToolSucceeded)
 }
 
 func Rescore(events []models.ArenaEvent, tools models.ToolCatalog) []models.ArenaEvent {

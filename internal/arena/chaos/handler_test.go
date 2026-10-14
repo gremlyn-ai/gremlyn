@@ -442,3 +442,31 @@ func TestGremlinHandler_MutatesRealWrapTraffic(t *testing.T) {
 	assert.NotContains(t, got, "pristine", "the server's original answer must have been replaced")
 	assert.Positive(t, log.Len(), "the injection must have been recorded")
 }
+
+func TestGremlinHandler_RecordsWhetherTheServerAnsweredSuccessfully(t *testing.T) {
+	errResp := &protocol.Message{Type: protocol.MessageTypeResponse, Response: &protocol.JSONRPCResponse{
+		JSONRPC: protocol.JSONRPCVersion, ID: protocol.NewIntID(7), Error: &protocol.JSONRPCError{Code: -32602, Message: "rejected"},
+	}}
+	tests := []struct {
+		name string
+		msg  *protocol.Message
+		mctx *proxy.MessageContext
+		want bool
+	}{
+		{"a successful result", toolResult(7, `{"content":[{"type":"text","text":"Created note #4"}]}`), incoming(), true},
+		{"a tool error", toolResult(7, `{"content":[{"type":"text","text":"a note needs a title"}],"isError":true}`), incoming(), false},
+		{"a JSON-RPC error", errResp, incoming(), false},
+		{"the agent's request", toolCall(7, "tools/call"), &proxy.MessageContext{Direction: models.DirectionOutgoing}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log := NewInjectionLog()
+			h := newHandler(log, alwaysInjects("timeout"))
+			_, err := h.HandleMessage(context.Background(), tt.msg, tt.mctx)
+			require.NoError(t, err)
+			require.Len(t, log.Injections(), 1)
+			assert.Equal(t, tt.want, log.Injections()[0].Succeeded,
+				"what the server answered before the gremlin, not after")
+		})
+	}
+}
