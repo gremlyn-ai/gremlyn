@@ -34,8 +34,17 @@ skips step 1, to test the download path.
 4. Fix the agent, with the fix that matches each gremlin.
 5. Re-run only the failed scenarios, with `--scenario`.
 
+When the report shows a hijacked call (a destructive tool called right after an injected
+instruction) or a duplicate write (a non-idempotent write called again after a timeout), the
+skill also proposes the server-side fix, if the user owns the server: a confirmation step or
+a narrower credential for the destructive tool, an idempotency key for the write, correct
+tool annotations. It applies a server change only with the user's agreement; with `--apply` it
+writes it as a proposal in the summary. When it writes a new scenario file for a server whose
+tools carry no annotations, it declares under `mcp_server.annotations` only what the user
+confirms or the server's code states.
+
 It never edits the test to make it pass: no lowered threshold, no removed scenario, no
-softened prompt.
+softened prompt, no tool re-declared to change its score.
 
 | Argument | Effect |
 |---|---|
