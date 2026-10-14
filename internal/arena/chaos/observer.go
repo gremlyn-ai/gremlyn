@@ -182,7 +182,10 @@ func (o *Observer) observe(ctx context.Context, msg *protocol.Message, mctx *pro
 	o.order = kept
 
 	o.observed += len(resolved)
-	tools := o.toolsLocked()
+	var tools models.ToolCatalog
+	if len(resolved) > 0 {
+		tools = o.toolsLocked()
+	}
 	o.mu.Unlock()
 
 	for _, r := range resolved {
