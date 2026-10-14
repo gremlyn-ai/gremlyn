@@ -26,6 +26,8 @@ import (
 const (
 	latestProtocol = "2025-06-18"
 	maxBody        = 1 << 20
+	maxSessions    = 1024
+	maxNotes       = 1000
 )
 
 func supportedProtocols() []string {
@@ -39,11 +41,13 @@ type note struct {
 }
 
 type annotations struct {
-	ReadOnlyHint    bool `json:"readOnlyHint"`
-	DestructiveHint bool `json:"destructiveHint"`
-	IdempotentHint  bool `json:"idempotentHint"`
-	OpenWorldHint   bool `json:"openWorldHint"`
+	ReadOnlyHint    *bool `json:"readOnlyHint,omitempty"`
+	DestructiveHint *bool `json:"destructiveHint,omitempty"`
+	IdempotentHint  *bool `json:"idempotentHint,omitempty"`
+	OpenWorldHint   *bool `json:"openWorldHint,omitempty"`
 }
+
+func hint(v bool) *bool { return &v }
 
 type property struct {
 	Type        string `json:"type"`
@@ -71,7 +75,7 @@ func toolList() []tool {
 			Title:       "List notes",
 			Description: "Lists every note with its id, title and text.",
 			InputSchema: inputSchema{Type: "object", Properties: map[string]property{}},
-			Annotations: annotations{ReadOnlyHint: true},
+			Annotations: annotations{ReadOnlyHint: hint(true), OpenWorldHint: hint(false)},
 		},
 		{
 			Name:        "create_note",
@@ -81,7 +85,9 @@ func toolList() []tool {
 				"title": {Type: "string", Description: "The note's title"},
 				"body":  {Type: "string", Description: "The note's text"},
 			}, Required: []string{"title", "body"}},
-			Annotations: annotations{IdempotentHint: false},
+			Annotations: annotations{
+				ReadOnlyHint: hint(false), DestructiveHint: hint(false), IdempotentHint: hint(false), OpenWorldHint: hint(false),
+			},
 		},
 		{
 			Name:        "delete_note",
@@ -90,7 +96,9 @@ func toolList() []tool {
 			InputSchema: inputSchema{Type: "object", Properties: map[string]property{
 				"id": {Type: "integer", Description: "The id of the note to delete"},
 			}, Required: []string{"id"}},
-			Annotations: annotations{DestructiveHint: true, IdempotentHint: true},
+			Annotations: annotations{
+				ReadOnlyHint: hint(false), DestructiveHint: hint(true), IdempotentHint: hint(true), OpenWorldHint: hint(false),
+			},
 		},
 	}
 }
@@ -192,8 +200,15 @@ func (s *server) post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.mu.Lock()
-		s.sessions[session] = true
+		full := len(s.sessions) >= maxSessions
+		if !full {
+			s.sessions[session] = true
+		}
 		s.mu.Unlock()
+		if full {
+			http.Error(w, "too many open sessions", http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Mcp-Session-Id", session)
 		writeJSON(w, rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: initializeResult(req.Params)})
 		return
@@ -250,6 +265,9 @@ func (s *server) call(raw json.RawMessage) (*toolResult, *rpcError) {
 	case "create_note":
 		if strings.TrimSpace(params.Arguments.Title) == "" {
 			return &toolResult{Content: []textContent{{Type: "text", Text: "a note needs a title"}}, IsError: true}, nil
+		}
+		if len(s.notes) >= maxNotes {
+			return &toolResult{Content: []textContent{{Type: "text", Text: fmt.Sprintf("the store is full (%d notes)", maxNotes)}}, IsError: true}, nil
 		}
 		id := s.add(params.Arguments.Title, params.Arguments.Body)
 		s.log.Info().Str("tool", params.Name).Int("id", id).Msg("created")

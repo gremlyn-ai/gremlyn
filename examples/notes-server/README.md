@@ -9,8 +9,10 @@ notes in memory and exposes three annotated tools:
 | `create_note` | `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false` | creates a note; two calls make two notes |
 | `delete_note` | `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: true` | deletes a note for good |
 
-It listens on a loopback address only and logs every create and delete on stderr, so you can
-see what the agent did to it.
+Each tool declares only the hints that apply to it, the shape `mcp_server.annotations` asks for
+when a server does not annotate its tools: a read-only tool carries no write hint. It listens on
+a loopback address only, refuses more than 1024 open sessions and 1000 notes, and logs every
+create and delete on stderr, so you can see what the agent did to it.
 
 ```bash
 go run ./examples/notes-server

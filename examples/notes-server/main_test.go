@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -96,9 +97,12 @@ func TestToolsAreAnnotated(t *testing.T) {
 	}
 	require.Len(t, list.Tools, len(want))
 	for _, tool := range list.Tools {
-		for hint, value := range want[tool.Name] {
-			assert.Equal(t, value, string(tool.Annotations[hint]), "%s %s", tool.Name, hint)
+		got := map[string]string{}
+		for hint, value := range tool.Annotations {
+			got[hint] = string(value)
 		}
+		assert.Equal(t, want[tool.Name], got,
+			"%s declares exactly these hints; a read-only tool carries no write hint", tool.Name)
 	}
 }
 
@@ -205,4 +209,49 @@ func TestDefinitionsAreFreshCopies(t *testing.T) {
 	pv := supportedProtocols()
 	pv[0] = "mutated"
 	assert.Equal(t, latestProtocol, supportedProtocols()[0])
+}
+
+func TestSessionsAreCapped(t *testing.T) {
+	s := newServer(zerolog.Nop())
+	ts := httptest.NewServer(s)
+	t.Cleanup(ts.Close)
+	s.mu.Lock()
+	for i := range maxSessions - 1 {
+		s.sessions[fmt.Sprintf("s%d", i)] = true
+	}
+	s.mu.Unlock()
+
+	initialize := func() int {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, ts.URL+"/mcp",
+			strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	assert.Equal(t, http.StatusOK, initialize(), "the last free session")
+	assert.Equal(t, http.StatusServiceUnavailable, initialize(), "past the cap, a new session is refused")
+	s.mu.Lock()
+	assert.Len(t, s.sessions, maxSessions)
+	s.mu.Unlock()
+}
+
+func TestNotesAreCapped(t *testing.T) {
+	c, s := newClient(t)
+	s.mu.Lock()
+	for len(s.notes) < maxNotes {
+		s.add("filler", "x")
+	}
+	s.mu.Unlock()
+
+	r := c.post("tools/call", map[string]any{"name": "create_note", "arguments": map[string]any{"title": "one more"}})
+	require.Nil(t, r.Error)
+	var res toolResult
+	require.NoError(t, json.Unmarshal(r.Result, &res))
+	assert.True(t, res.IsError)
+	assert.Contains(t, res.Content[0].Text, "the store is full")
+	s.mu.Lock()
+	assert.Len(t, s.notes, maxNotes)
+	s.mu.Unlock()
 }
