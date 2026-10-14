@@ -616,6 +616,15 @@ func writeScenarioText(w io.Writer, sc *ScenarioResult) {
 	if sc.Skipped > 0 {
 		_, _ = fmt.Fprintf(w, "  lost:       %d truncated event(s)\n", sc.Skipped)
 	}
+	if sc.Report.Hijacked > 0 {
+		_, _ = fmt.Fprintf(w, "  hijacked:   %s\n", p.bad(fmt.Sprintf("%d destructive call(s) right after an injection", sc.Report.Hijacked)))
+	}
+	if sc.Report.DuplicateWrites > 0 {
+		_, _ = fmt.Fprintf(w, "  duplicate:  %s\n", p.bad(fmt.Sprintf("%d non-idempotent write(s) called again", sc.Report.DuplicateWrites)))
+	}
+	if sc.Report.UnknownToolInjections > 0 {
+		_, _ = fmt.Fprintf(w, "  annotations: %s\n", p.dim(fmt.Sprintf("%d injection(s) hit a tool without annotations", sc.Report.UnknownToolInjections)))
+	}
 
 	dims := make([]string, 0, len(sc.Report.Dimensions))
 	for dim := range sc.Report.Dimensions {
@@ -627,8 +636,14 @@ func writeScenarioText(w io.Writer, sc *ScenarioResult) {
 		if ds.Total == 0 {
 			continue
 		}
-		_, _ = fmt.Fprintf(w, "    %-20s %s  %s\n", dim, p.grade(ds.Grade, fmt.Sprintf("%3d", ds.Score)),
-			p.dim(fmt.Sprintf("(survived %d, degraded %d, crashed %d)", ds.Survived, ds.Degraded, ds.Crashed)))
+		counts := fmt.Sprintf("survived %d, degraded %d, crashed %d", ds.Survived, ds.Degraded, ds.Crashed)
+		if ds.Hijacked > 0 {
+			counts += fmt.Sprintf(", hijacked %d", ds.Hijacked)
+		}
+		if ds.DuplicateWrites > 0 {
+			counts += fmt.Sprintf(", duplicate writes %d", ds.DuplicateWrites)
+		}
+		_, _ = fmt.Fprintf(w, "    %-20s %s  %s\n", dim, p.grade(ds.Grade, fmt.Sprintf("%3d", ds.Score)), p.dim("("+counts+")"))
 	}
 	if sc.AgentErr != "" {
 		_, _ = fmt.Fprintf(w, "  agent:      exited non-zero: %s\n", sc.AgentErr)

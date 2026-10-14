@@ -490,3 +490,22 @@ func TestExampleHTTPScenarioFile(t *testing.T) {
 	_, err = loadCIConfig(filepath.Join("..", "..", "examples", "arena-http.yaml"))
 	require.Error(t, err, "the example must refuse to run without its token")
 }
+
+func TestWriteScenarioText_AnnotationAwareFindings(t *testing.T) {
+	res := ScenarioResult{Name: "x", Report: scoring.ResilienceReport{
+		Overall: 0, Grade: scoring.GradeCritical, Measured: true,
+		Hijacked: 1, DuplicateWrites: 2, UnknownToolInjections: 3,
+		Dimensions: map[scoring.Dimension]scoring.DimensionScore{
+			scoring.DimensionInjection: {Total: 1, Hijacked: 1, Grade: scoring.GradeCritical},
+			scoring.DimensionLatency:   {Total: 2, DuplicateWrites: 2, Score: 10, Grade: scoring.GradeCritical},
+		},
+	}}
+	var out strings.Builder
+	writeScenarioText(&out, &res)
+	text := out.String()
+	assert.Contains(t, text, "hijacked:   1 destructive call(s) right after an injection")
+	assert.Contains(t, text, "duplicate:  2 non-idempotent write(s) called again")
+	assert.Contains(t, text, "annotations: 3 injection(s) hit a tool without annotations")
+	assert.Contains(t, text, "hijacked 1)")
+	assert.Contains(t, text, "duplicate writes 2)")
+}
