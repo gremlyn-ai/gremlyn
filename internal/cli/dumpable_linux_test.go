@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	environHelperEnv    = "GREMLYN_ENVIRON_HELPER"
-	environHelperSecret = "GREMLYN_ENVIRON_SECRET"
+	environHelperEnv = "GREMLYN_ENVIRON_HELPER"
+	environProbeEnv  = "GREMLYN_ENVIRON_PROBE"
 )
 
 func TestEnvironHelperProcess(t *testing.T) {
@@ -34,7 +34,7 @@ func TestEnvironHelperProcess(t *testing.T) {
 	switch {
 	case err != nil:
 		fmt.Println("DENIED")
-	case strings.Contains(string(out), os.Getenv(environHelperSecret)):
+	case strings.Contains(string(out), os.Getenv(environProbeEnv)):
 		fmt.Println("READ")
 	default:
 		fmt.Println("UNKNOWN")
@@ -42,10 +42,10 @@ func TestEnvironHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-func runEnvironHelper(t *testing.T, mode, secret string) string {
+func runEnvironHelper(t *testing.T, mode, probe string) string {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestEnvironHelperProcess$")
-	cmd.Env = append(os.Environ(), environHelperEnv+"="+mode, environHelperSecret+"="+secret)
+	cmd.Env = append(os.Environ(), environHelperEnv+"="+mode, environProbeEnv+"="+probe)
 	out, err := cmd.Output()
 	require.NoError(t, err)
 	return strings.TrimSpace(string(out))
@@ -58,9 +58,9 @@ func TestProtectProcessEnviron_ChildCannotReadParentEnviron(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads any process's environment, dumpable or not")
 	}
-	secret := "environ-" + uuid.NewString()
-	assert.Contains(t, runEnvironHelper(t, "open", secret), "READ",
+	probe := "environ-" + uuid.NewString()
+	assert.Contains(t, runEnvironHelper(t, "open", probe), "READ",
 		"control: without the call, a same-user child reads its parent's environment")
-	assert.Contains(t, runEnvironHelper(t, "protect", secret), "DENIED",
+	assert.Contains(t, runEnvironHelper(t, "protect", probe), "DENIED",
 		"after PR_SET_DUMPABLE 0, a same-user child cannot read it")
 }
