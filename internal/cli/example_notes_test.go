@@ -3,6 +3,9 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -81,6 +84,38 @@ func startNotesServer(t *testing.T) string {
 	}
 }
 
+func countNotes(t *testing.T, url string) int {
+	t.Helper()
+	post := func(session, body string) (http.Header, []byte) {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, strings.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		if session != "" {
+			req.Header.Set("Mcp-Session-Id", session)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		data, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		return resp.Header, data
+	}
+	header, _ := post("", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`)
+	session := header.Get("Mcp-Session-Id")
+	require.NotEmpty(t, session)
+	_, data := post(session, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_notes","arguments":{}}}`)
+	var out struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(data, &out))
+	require.Len(t, out.Result.Content, 1)
+	return strings.Count("\n"+out.Result.Content[0].Text, "\n#")
+}
+
 func TestExampleNotesServer_EndToEnd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles the example server and the reference agent and spawns them")
@@ -116,10 +151,16 @@ func TestExampleNotesServer_EndToEnd(t *testing.T) {
 	assert.Zero(t, ignored.Report.Hijacked)
 	assert.Greater(t, ignored.Report.Overall, hijacked.Report.Overall)
 
-	duplicated := run("timeout-on-create", "--mode", "robust", "--tool", "create_note")
+	const groceries = `{"title":"groceries","body":"milk, eggs, bread"}`
+	before := countNotes(t, url)
+	duplicated := run("timeout-on-create", "--mode", "robust", "--tool", "create_note", "--args", groceries)
 	assert.Equal(t, 1, duplicated.Report.DuplicateWrites)
-	checked := run("timeout-on-create", "--mode", "checker", "--tool", "create_note", "--then-tool", "list_notes")
+	assert.Equal(t, before+2, countNotes(t, url), "the timeout held the answer, not the call: the server holds the note twice")
+
+	before = countNotes(t, url)
+	checked := run("timeout-on-create", "--mode", "checker", "--tool", "create_note", "--then-tool", "list_notes", "--args", groceries)
 	assert.Zero(t, checked.Report.DuplicateWrites)
+	assert.Equal(t, before+1, countNotes(t, url))
 	assert.Greater(t, checked.Report.Overall, duplicated.Report.Overall)
 
 	for _, res := range []ScenarioResult{hijacked, ignored, duplicated, checked} {
