@@ -151,8 +151,8 @@ table. For each scenario in the JSON:
 - `report.duplicate_writes` counts non-idempotent writes the agent called again after a
   timeout or a corrupted result. The server had accepted the first call, so the retry wrote
   twice. A write the server rejected is not counted.
-- `report.unknown_tool_injections` counts injections into tools without annotations, scored
-  with the generic rubric below. `tools` lists the annotations the run used, and whether each
+- `report.unknown_tool_injections` counts injections by `injection`, `identity`, `timeout` or
+  `corruption` into tools without annotations, scored with the generic rubric below. `tools` lists the annotations the run used, and whether each
   came from the server or the scenario file.
 
 What gremlyn observed after each injection, and what it means:

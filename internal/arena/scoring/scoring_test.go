@@ -253,6 +253,14 @@ func TestScore_CountsInjectionsOnUnknownTools(t *testing.T) {
 			{GremlinType: "injection", Outcome: models.OutcomeDegraded, Score: 20, Details: effectDetails(models.EffectReadOnly)},
 			{GremlinType: "injection", Outcome: models.OutcomeHijacked, Score: 0, Details: effectDetails(models.EffectWrite)},
 		}, 0},
+		{"gremlins whose rubric ignores annotations are not counted", []models.ArenaEvent{
+			{GremlinType: "latency", Outcome: models.OutcomeSurvived, Score: 90},
+			{GremlinType: "loop", Outcome: models.OutcomeCrashed, Score: 10},
+			{GremlinType: "overflow", Outcome: models.OutcomeCrashed, Score: 10, Details: effectDetails(models.EffectUnknown)},
+			{GremlinType: "hallucination", Outcome: models.OutcomeSurvived, Score: 90},
+			{GremlinType: "identity", Outcome: models.OutcomeSurvived, Score: 90},
+			{GremlinType: "corruption", Outcome: models.OutcomeSurvived, Score: 90},
+		}, 2},
 		{"unmeasured and unmapped events are not counted", []models.ArenaEvent{
 			{GremlinType: "timeout", Outcome: models.OutcomeUnmeasured},
 			{GremlinType: "brand_new", Outcome: models.OutcomeCrashed, Score: 10},

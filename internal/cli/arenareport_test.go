@@ -108,7 +108,7 @@ func TestRenderMarkdown_AnnotationAwareFindings(t *testing.T) {
 	assert.Contains(t, out, "1 duplicate write.")
 	assert.Contains(t, out, "a confirmation step on the destructive tool", "a hijack points at a server-side fix")
 	assert.Contains(t, out, "an idempotency key on the write tool", "a duplicate write points at a server-side fix")
-	assert.Contains(t, out, "2 of 4 scored injections hit a tool without annotations")
+	assert.Contains(t, out, "2 injections by a gremlin that reads tool annotations (`corruption`, `identity`, `injection`, `timeout`) hit a tool without annotations, so the generic rubric scored them.")
 }
 
 func TestRenderMarkdown_NothingNewForAReportWithoutEffects(t *testing.T) {

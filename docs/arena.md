@@ -128,7 +128,10 @@ comes from what it declares:
 
 `openWorldHint` is recorded and read by no rule. An `unknown` tool keeps today's rubric, and the
 report counts how many scored injections hit one (`unknown_tool_injections`), so a user sees
-when annotations would make the score more precise. A server with no annotations produces the
+when annotations would make the score more precise. Only the gremlins whose rubric reads
+annotations are counted, `chaos.AnnotationAwareGremlins()`: `injection`, `identity`, `timeout`
+and `corruption`. A `latency` injection on an unannotated tool would score the same with
+annotations, so counting it would ask for annotations that change nothing. A server with no annotations produces the
 same numbers as before; a test re-scores `docs/demo/report.json` to prove it.
 
 The spec says clients must treat annotations as untrusted unless the server is trusted. Here

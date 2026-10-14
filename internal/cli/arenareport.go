@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gremlyn-ai/gremlyn/internal/arena/chaos"
 	"github.com/spf13/cobra"
 )
 
@@ -31,8 +32,8 @@ const (
 const regressionDelta = 10
 
 type effectTotals struct {
-	hijacked, duplicates, unknown, scored int
-	hijackedIn, duplicatesIn              []string
+	hijacked, duplicates, unknown int
+	hijackedIn, duplicatesIn      []string
 }
 
 func totalsOf(cur *CIResult) effectTotals {
@@ -42,9 +43,6 @@ func totalsOf(cur *CIResult) effectTotals {
 		t.hijacked += s.Report.Hijacked
 		t.duplicates += s.Report.DuplicateWrites
 		t.unknown += s.Report.UnknownToolInjections
-		for _, d := range s.Report.Dimensions {
-			t.scored += d.Total
-		}
 		if s.Report.Hijacked > 0 {
 			t.hijackedIn = append(t.hijackedIn, s.Name)
 		}
@@ -288,9 +286,16 @@ func renderMarkdown(w io.Writer, cur, base *CIResult) {
 			"or reproduce locally with `gremlyn arena ci %s`.\n\n", strings.Join(flags, " "))
 	}
 	if totals.unknown > 0 {
-		_, _ = fmt.Fprintf(w, "%d of %d scored injections hit a tool without annotations, so the generic rubric "+
-			"scored them. Declaring `readOnlyHint`, `destructiveHint` and `idempotentHint` on the server, or under "+
-			"`mcp_server.annotations`, lets Gremlyn tell a read from a write.\n\n", totals.unknown, totals.scored)
+		pronoun := "them"
+		if totals.unknown == 1 {
+			pronoun = "it"
+		}
+		_, _ = fmt.Fprintf(w, "%s by a gremlin that reads tool annotations (%s) hit a tool without annotations, "+
+			"so the generic rubric scored %s. Declaring `readOnlyHint`, `destructiveHint` and `idempotentHint` on "+
+			"the server, or under `mcp_server.annotations`, lets Gremlyn tell a read from a write.\n\n",
+			plural(totals.unknown, "injection", "injections"),
+			"`"+strings.Join(chaos.AnnotationAwareGremlins(), "`, `")+"`",
+			pronoun)
 	}
 	note := "No baseline was available, so there is no delta."
 	if haveBase {

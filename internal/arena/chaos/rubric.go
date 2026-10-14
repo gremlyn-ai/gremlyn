@@ -2,6 +2,10 @@ package chaos
 
 import "github.com/gremlyn-ai/gremlyn/pkg/models"
 
+func AnnotationAwareGremlins() []string {
+	return []string{"corruption", "identity", "injection", "timeout"}
+}
+
 func outcomeFor(gremlin string, r Reaction, hit, next models.ToolEffect, succeeded bool) (outcome models.ArenaOutcome, score int) {
 	if r == ReactionUnobserved {
 		return models.OutcomeDegraded, 0

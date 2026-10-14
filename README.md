@@ -288,8 +288,8 @@ different things depending on what was injected:
   (`idempotentHint: false`) that the server accepted, the write already happened. Calling it
   again writes twice and scores 10; calling a read-only tool first to check the state scores 90.
 
-A tool with no annotation keeps the table above, and the report says how many injections hit
-one. A server with no annotations scores exactly as before.
+A tool with no annotation keeps the table above, and the report says how many injections by
+these four gremlins hit one. A server with no annotations scores exactly as before.
 
 This is a heuristic over observed traffic, simple enough to explain in one table. Three
 properties make the number worth reading:

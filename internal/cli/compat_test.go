@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/gremlyn-ai/gremlyn/internal/arena/chaos"
@@ -112,8 +113,12 @@ func TestCompat_DemoReportRescoresIdentically(t *testing.T) {
 					got := scoring.Score(chaos.Rescore(events, tools), nil)
 					assert.Zero(t, got.Hijacked)
 					assert.Zero(t, got.DuplicateWrites)
-					assert.Equal(t, len(events), got.UnknownToolInjections,
-						"every injection of an unannotated server hit an unknown tool")
+					wantUnknown := 0
+					if slices.Contains(chaos.AnnotationAwareGremlins(), gremlin) {
+						wantUnknown = len(events)
+					}
+					assert.Equal(t, wantUnknown, got.UnknownToolInjections,
+						"every injection of an unannotated server hit an unknown tool, counted for the gremlins that read annotations")
 
 					got.UnknownToolInjections = 0
 					data, err := json.Marshal(got)

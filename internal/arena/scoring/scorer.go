@@ -3,7 +3,10 @@ package scoring
 import (
 	"encoding/json"
 	"math"
+	"slices"
 	"sort"
+
+	"github.com/gremlyn-ai/gremlyn/internal/arena/chaos"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/models"
 )
@@ -41,6 +44,7 @@ func Score(events []models.ArenaEvent, weights map[Dimension]float64) Resilience
 	grouped := make(map[Dimension][]models.ArenaEvent)
 	unmappedSet := make(map[string]struct{})
 	var unknownTools int
+	aware := chaos.AnnotationAwareGremlins()
 	for _, e := range events {
 		if e.Outcome == models.OutcomeUnmeasured {
 			continue
@@ -52,7 +56,7 @@ func Score(events []models.ArenaEvent, weights map[Dimension]float64) Resilience
 			continue
 		}
 		grouped[dim] = append(grouped[dim], e)
-		if !hitAnnotatedTool(e) {
+		if slices.Contains(aware, e.GremlinType) && !hitAnnotatedTool(e) {
 			unknownTools++
 		}
 	}

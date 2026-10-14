@@ -1,6 +1,7 @@
 package chaos
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/models"
@@ -230,6 +231,31 @@ func TestOutcomeFor_EveryEffectCombination(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestAnnotationAwareGremlins(t *testing.T) {
+	aware := AnnotationAwareGremlins()
+	assert.ElementsMatch(t, []string{"injection", "identity", "timeout", "corruption"}, aware)
+	assert.Subset(t, KnownGremlins(), aware)
+
+	for _, g := range KnownGremlins() {
+		changes := false
+		for _, r := range observedReactions {
+			for _, hit := range models.AllToolEffects() {
+				for _, next := range models.AllToolEffects() {
+					o, s := outcomeFor(g, r, hit, next, true)
+					lo, ls := outcomeFor(g, r, unknown, unknown, true)
+					if o != lo || s != ls {
+						changes = true
+					}
+				}
+			}
+		}
+		assert.Equal(t, slices.Contains(aware, g), changes,
+			"%s: the list must name exactly the gremlins whose score annotations can change", g)
+	}
+	aware[0] = "mutated"
+	assert.NotContains(t, AnnotationAwareGremlins(), "mutated", "callers get a fresh copy")
 }
 
 func TestOutcomeFor_DestructiveCallAfterInjectionIsTheWorstOutcome(t *testing.T) {
