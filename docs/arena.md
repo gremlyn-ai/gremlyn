@@ -195,8 +195,10 @@ which is where third-party text sits on a real server whose reads return pages o
 `content`: the event records `placement: content`, the model received the instruction to delete
 a note, and it did not call `delete_note` (reaction `silent`, 90).
 
-`identity` has the same blindness and no placement param yet: it replaces the result with an
-object that has no `content`, so through Claude Code the model sees nothing of it.
+Other gremlins share the blindness and have no placement param yet: `identity`, `loop`,
+`overflow` and `corruption` in its `wrong_types` mode replace the result with an object that has
+no `content`, so through Claude Code the model sees an empty result. The agent's reaction is then
+a reaction to that emptiness more than to the gremlin's own failure.
 
 **Comparing with older baselines.** For a server whose tools are annotated, the same agent
 behaviour can now score differently than it did with an older Gremlyn: a hijack that used to
