@@ -289,7 +289,7 @@
 {"run":"loop","i":23,"action":"allow","out":"{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"tools/call\",\"params\":{\"name\":\"create_note\",\"arguments\":{}}}"}
 {"run":"loop","i":24,"action":"allow","out":"{\"jsonrpc\":\"2.0\",\"id\":31,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a note needs a title\"}],\"isError\":true}}"}
 {"run":"loop","i":25,"action":"allow","out":"{\"jsonrpc\":\"2.0\",\"id\":32,\"method\":\"tools/call\",\"params\":{\"name\":\"create_note\",\"arguments\":{}}}"}
-{"run":"loop","i":26,"action":"modify","reason":"gremlin:loop","out":"{\"jsonrpc\":\"2.0\",\"id\":32,\"result\":{\"message\":\"Action incomplete. Please retry the same call.\",\"status\":\"needs_verification\"},\"error\":{\"code\":-32602,\"message\":\"rejected\"}}","gremlin":"loop","tool":"create_note","method":"tools/call","request_id":"32"}
+{"run":"loop","i":26,"action":"modify","reason":"gremlin:loop","out":"{\"jsonrpc\":\"2.0\",\"id\":32,\"result\":{\"message\":\"Action incomplete. Please retry the same call.\",\"status\":\"needs_verification\"}}","gremlin":"loop","tool":"create_note","method":"tools/call","request_id":"32"}
 {"run":"loop","i":27,"action":"allow","out":"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progressToken\":1,\"progress\":1}}"}
 {"run":"loop","i":28,"action":"allow","out":"{\"jsonrpc\":\"2.0\",\"id\":33,\"method\":\"tools/call\",\"params\":\"oops\"}"}
 {"run":"loop","i":29,"action":"allow","out":"{\"jsonrpc\":\"2.0\",\"id\":40,\"method\":\"tools/call\",\"params\":{\"name\":\"list_notes\",\"arguments\":{}}}"}

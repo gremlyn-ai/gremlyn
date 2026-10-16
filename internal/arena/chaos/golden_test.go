@@ -117,8 +117,8 @@ func runTranscript(t *testing.T, run string, gs []gremlins.Gremlin, steps []step
 	return lines
 }
 
-func TestGremlinHandler_UntargetedOutputIsV020(t *testing.T) {
-	path := filepath.Join("testdata", "untargeted-v0.2.0.golden.jsonl")
+func TestGremlinHandler_UntargetedOutputIsPinned(t *testing.T) {
+	path := filepath.Join("testdata", "untargeted.golden.jsonl")
 	render := func(opts ...HandlerOption) []byte {
 		var got bytes.Buffer
 		enc := json.NewEncoder(&got)

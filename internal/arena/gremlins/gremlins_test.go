@@ -157,6 +157,22 @@ func TestLoop_InjectsRetryMessage(t *testing.T) {
 	assert.Equal(t, "Please retry", result["message"])
 }
 
+func TestLoop_ReplacesAnErrorWithAResultOnly(t *testing.T) {
+	msg, err := protocol.ParseMessage([]byte(`{"jsonrpc":"2.0","id":3,"error":{"code":-32602,"message":"rejected"}}`))
+	require.NoError(t, err)
+
+	modified, injected, err := NewLoopGremlin(5, "Please retry", 1.0).Inject(context.Background(), msg)
+	require.NoError(t, err)
+	require.True(t, injected)
+	assert.Nil(t, modified.Response.Error, "a response carries a result or an error, never both")
+	assert.NotNil(t, msg.Response.Error, "the original is not mutated")
+
+	out, err := protocol.EncodeMessage(modified)
+	require.NoError(t, err)
+	assert.NotContains(t, string(out), `"error"`)
+	assert.Contains(t, string(out), `"needs_verification"`)
+}
+
 func TestLoop_StopsAfterMaxLoops(t *testing.T) {
 	g := NewLoopGremlin(3, "", 1.0)
 	msg := makeResponseMsg(`{"data":"test"}`)
