@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: "22"
 
-      - uses: gremlyn-ai/gremlyn/action@v0.3.0
+      - uses: gremlyn-ai/gremlyn/action@v0.3.1
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
