@@ -120,4 +120,5 @@ type EventDetails struct {
 	ToolSucceeded bool       `json:"tool_succeeded,omitempty"`
 	ToolEffect    ToolEffect `json:"tool_effect,omitempty"`
 	NextEffect    ToolEffect `json:"next_effect,omitempty"`
+	Placement     string     `json:"placement,omitempty"`
 }

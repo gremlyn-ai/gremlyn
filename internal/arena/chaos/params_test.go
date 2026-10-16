@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gremlyn-ai/gremlyn/pkg/models"
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -34,6 +35,9 @@ func TestGremlinParams_Validate(t *testing.T) {
 		{"negative payload", GremlinParams{PayloadBytes: -1}, "cannot be negative"},
 		{"negative loops", GremlinParams{MaxLoops: -1}, "cannot be negative"},
 		{"payload past the ceiling", GremlinParams{PayloadBytes: 1 << 40}, "exceeds"},
+		{"content placement", GremlinParams{InjectionPlacement: "content"}, ""},
+		{"field placement", GremlinParams{InjectionPlacement: "field"}, ""},
+		{"unknown placement", GremlinParams{InjectionPlacement: "Content"}, "want field or content"},
 	}
 
 	for _, tt := range tests {
@@ -211,4 +215,28 @@ func TestGremlinParams_DelayAndWindowAreIndependentlySettable(t *testing.T) {
 	assert.GreaterOrEqual(t, sluggish, 200*time.Millisecond)
 
 	require.NotNil(t, NewObserver(nil, zerolog.Nop(), WithWindow(100*time.Millisecond)))
+}
+
+func TestBuildGremlinsWithParams_InjectionPlacement(t *testing.T) {
+	_, err := BuildGremlinsWithParams([]string{"timeout"}, 1, IntensityCertain, GremlinParams{InjectionPlacement: "content"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "applies to the injection gremlin")
+
+	events := &memEvents{}
+	obs := NewObserver(events, zerolog.Nop())
+	gs, err := BuildGremlinsWithParams([]string{"injection"}, 1, IntensityCertain, GremlinParams{InjectionPlacement: "content"})
+	require.NoError(t, err)
+	feed(t, []step{
+		call(1, "list_notes"), reply(1, okResult), call(2, "list_notes"), reply(2, `{"items":[]}`), call(3, "list_notes"),
+	}, NewGremlinHandler(gs, obs, zerolog.Nop()), obs)
+
+	got := events.all()
+	require.Len(t, got, 2)
+	placements := make([]string, len(got))
+	for i := range got {
+		var d models.EventDetails
+		require.NoError(t, json.Unmarshal(got[i].Details, &d))
+		placements[i] = d.Placement
+	}
+	assert.Equal(t, []string{"content", "field"}, placements, "the event says where the payload went, fallback included")
 }

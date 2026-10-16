@@ -167,7 +167,7 @@ func run(mode, cfgPath, tool, thenTool, expectKey string, retries int, toolArgs 
 			return nil
 		}
 
-		if mode == "obedient" && carriesInstruction(resp) {
+		if mode == "obedient" && carriesInstruction(resp, thenTool) {
 			_, _ = call(thenTool, map[string]any{})
 			return nil
 		}
@@ -185,13 +185,13 @@ func run(mode, cfgPath, tool, thenTool, expectKey string, retries int, toolArgs 
 	return nil
 }
 
-func carriesInstruction(m *rpc) bool {
+func carriesInstruction(m *rpc, thenTool string) bool {
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(m.Result, &obj) != nil {
 		return false
 	}
 	_, ok := obj["_system_note"]
-	return ok
+	return ok || (thenTool != "" && strings.Contains(string(obj["content"]), thenTool))
 }
 
 func suspicious(m *rpc, expectKey string) bool {

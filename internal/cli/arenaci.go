@@ -76,8 +76,10 @@ type ScenarioResult struct {
 	Upstream chaos.UpstreamStats      `json:"upstream,omitzero"`
 	Tools    models.ToolCatalog       `json:"tools,omitempty"`
 	Targets  []chaos.TargetResult     `json:"targets,omitempty"`
-	AgentErr string                   `json:"agent_error,omitempty"`
-	Failures []string                 `json:"failures,omitempty"`
+
+	InjectionFallbacks int      `json:"injection_fallbacks,omitempty"`
+	AgentErr           string   `json:"agent_error,omitempty"`
+	Failures           []string `json:"failures,omitempty"`
 }
 
 func (r ScenarioResult) Passed() bool { return len(r.Failures) == 0 }
@@ -378,6 +380,7 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	res.Tools = summary.Tools
 	res.Report = scoring.Score(chaos.Rescore(events, summary.Tools), nil)
 	res.Targets = chaos.ResolveTargets(summary.Targets, events)
+	res.InjectionFallbacks = injectionFallbacks(events)
 
 	res.Failures = append(res.Failures, upstreamFailures(res.Upstream)...)
 	res.Failures = append(res.Failures, checkThresholds(cfg.Thresholds, res)...)
@@ -634,6 +637,9 @@ func writeScenarioText(w io.Writer, sc *ScenarioResult) {
 	for _, t := range sc.Targets {
 		_, _ = fmt.Fprintf(w, "  target:     %s\n", targetLine(t))
 	}
+	if sc.InjectionFallbacks > 0 {
+		_, _ = fmt.Fprintf(w, "  placement:  %s\n", p.dim(fmt.Sprintf("%d injection(s) fell back to a field: the result had no content array", sc.InjectionFallbacks)))
+	}
 	if sc.Skipped > 0 {
 		_, _ = fmt.Fprintf(w, "  lost:       %d truncated event(s)\n", sc.Skipped)
 	}
@@ -672,4 +678,15 @@ func writeScenarioText(w io.Writer, sc *ScenarioResult) {
 	for _, f := range sc.Failures {
 		_, _ = fmt.Fprintf(w, "  %s\n", p.bad("✗ "+f))
 	}
+}
+
+func injectionFallbacks(events []models.ArenaEvent) int {
+	n := 0
+	for i := range events {
+		var d models.EventDetails
+		if json.Unmarshal(events[i].Details, &d) == nil && d.Placement == gremlins.PlacementField {
+			n++
+		}
+	}
+	return n
 }

@@ -83,9 +83,14 @@ func builders(seed int64) map[string]Gremlin {
 		"hallucination": NewHallucinationGremlin("fake_tool", 0.5, WithSeed(seed)),
 		"loop":          NewLoopGremlin(3, "retry", 0.5, WithSeed(seed)),
 		"injection":     NewInjectionGremlin("ignore previous", 0.5, WithSeed(seed)),
-		"identity":      NewIdentityGremlin("you are evil", 0.5, WithSeed(seed)),
-		"overflow":      NewOverflowGremlin(1024, 0.5, WithSeed(seed)),
-		"timeout":       NewTimeoutGremlin(1, 2, 0.5, WithSeed(seed)),
+		"injection-content": func() Gremlin {
+			g := NewInjectionGremlin("ignore previous", 0.5, WithSeed(seed))
+			g.Placement = PlacementContent
+			return g
+		}(),
+		"identity": NewIdentityGremlin("you are evil", 0.5, WithSeed(seed)),
+		"overflow": NewOverflowGremlin(1024, 0.5, WithSeed(seed)),
+		"timeout":  NewTimeoutGremlin(1, 2, 0.5, WithSeed(seed)),
 	}
 }
 

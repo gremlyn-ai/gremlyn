@@ -13,6 +13,7 @@ import (
 
 	"github.com/gremlyn-ai/gremlyn/internal/arena/chaos"
 	"github.com/gremlyn-ai/gremlyn/internal/arena/scoring"
+	"github.com/gremlyn-ai/gremlyn/pkg/models"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -547,4 +548,16 @@ func TestWriteScenarioText_AnnotationAwareFindings(t *testing.T) {
 	assert.Contains(t, text, "annotations: 3 injection(s) hit a tool without annotations")
 	assert.Contains(t, text, "hijacked 1)")
 	assert.Contains(t, text, "duplicate writes 2)")
+}
+
+func TestInjectionFallbacks(t *testing.T) {
+	ev := func(details string) models.ArenaEvent { return models.ArenaEvent{Details: json.RawMessage(details)} }
+	assert.Equal(t, 1, injectionFallbacks([]models.ArenaEvent{ev(`{"placement":"field"}`), ev(`{"placement":"content"}`), ev(`{}`), {}}))
+
+	var b strings.Builder
+	writeScenarioText(&b, &ScenarioResult{Name: "s", InjectionFallbacks: 1})
+	assert.Contains(t, b.String(), "1 injection(s) fell back to a field")
+	b.Reset()
+	writeScenarioText(&b, &ScenarioResult{Name: "s"})
+	assert.NotContains(t, b.String(), "placement:")
 }

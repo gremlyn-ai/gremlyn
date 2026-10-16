@@ -64,6 +64,8 @@ type GremlinParams struct {
 	InjectionText string `json:"injection_text,omitempty" yaml:"injection_text,omitempty"`
 	IdentityText  string `json:"identity_text,omitempty" yaml:"identity_text,omitempty"`
 	LoopMessage   string `json:"loop_message,omitempty" yaml:"loop_message,omitempty"`
+
+	InjectionPlacement string `json:"injection_placement,omitempty" yaml:"injection_placement,omitempty"`
 }
 
 const (
@@ -108,6 +110,11 @@ func (g GremlinParams) Validate() error {
 	}
 	if g.MaxLoops < 0 {
 		return fmt.Errorf("max_loops cannot be negative")
+	}
+	switch g.InjectionPlacement {
+	case "", gremlins.PlacementField, gremlins.PlacementContent:
+	default:
+		return fmt.Errorf("injection_placement %q: want field or content", g.InjectionPlacement)
 	}
 	return nil
 }
@@ -193,6 +200,9 @@ func BuildGremlinsWithParams(
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no gremlins requested")
 	}
+	if params.InjectionPlacement != "" && !seen["injection"] {
+		return nil, fmt.Errorf("injection_placement applies to the injection gremlin, which is not in %v", names)
+	}
 	return out, nil
 }
 
@@ -205,7 +215,9 @@ func buildOne(name string, p float64, opt gremlins.Option, prm GremlinParams) (g
 	case "identity":
 		return gremlins.NewIdentityGremlin(prm.IdentityText, p, opt), nil
 	case "injection":
-		return gremlins.NewInjectionGremlin(prm.InjectionText, p, opt), nil
+		g := gremlins.NewInjectionGremlin(prm.InjectionText, p, opt)
+		g.Placement = prm.InjectionPlacement
+		return g, nil
 	case "latency":
 		return gremlins.NewLatencyGremlin(prm.MinDelayMs, prm.MaxDelayMs, p, opt), nil
 	case "loop":
