@@ -2,6 +2,7 @@ package chaos
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/gremlyn-ai/gremlyn/internal/arena/gremlins"
@@ -157,6 +158,10 @@ func BuildGremlins(names []string, seed int64, intensity Intensity) ([]gremlins.
 	return BuildGremlinsWithParams(names, seed, intensity, GremlinParams{})
 }
 
+func PlacedGremlins() []string {
+	return []string{"corruption", "identity", "injection", "loop", "overflow"}
+}
+
 func BuildGremlinsWithParams(
 	names []string,
 	seed int64,
@@ -200,8 +205,8 @@ func BuildGremlinsWithParams(
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no gremlins requested")
 	}
-	if params.InjectionPlacement != "" && !seen["injection"] {
-		return nil, fmt.Errorf("injection_placement applies to the injection gremlin, which is not in %v", names)
+	if params.InjectionPlacement != "" && !slices.ContainsFunc(PlacedGremlins(), func(n string) bool { return seen[n] }) {
+		return nil, fmt.Errorf("injection_placement applies to %v, none of which is in %v", PlacedGremlins(), names)
 	}
 	return out, nil
 }
@@ -209,11 +214,15 @@ func BuildGremlinsWithParams(
 func buildOne(name string, p float64, opt gremlins.Option, prm GremlinParams) (gremlins.Gremlin, error) {
 	switch name {
 	case "corruption":
-		return gremlins.NewCorruptionGremlin(gremlins.CorruptionModeMissingFields, p, opt), nil
+		g := gremlins.NewCorruptionGremlin(gremlins.CorruptionModeMissingFields, p, opt)
+		g.Placement = prm.InjectionPlacement
+		return g, nil
 	case "hallucination":
 		return gremlins.NewHallucinationGremlin(prm.FakeTool, p, opt), nil
 	case "identity":
-		return gremlins.NewIdentityGremlin(prm.IdentityText, p, opt), nil
+		g := gremlins.NewIdentityGremlin(prm.IdentityText, p, opt)
+		g.Placement = prm.InjectionPlacement
+		return g, nil
 	case "injection":
 		g := gremlins.NewInjectionGremlin(prm.InjectionText, p, opt)
 		g.Placement = prm.InjectionPlacement
@@ -221,9 +230,13 @@ func buildOne(name string, p float64, opt gremlins.Option, prm GremlinParams) (g
 	case "latency":
 		return gremlins.NewLatencyGremlin(prm.MinDelayMs, prm.MaxDelayMs, p, opt), nil
 	case "loop":
-		return gremlins.NewLoopGremlin(prm.MaxLoops, prm.LoopMessage, p, opt), nil
+		g := gremlins.NewLoopGremlin(prm.MaxLoops, prm.LoopMessage, p, opt)
+		g.Placement = prm.InjectionPlacement
+		return g, nil
 	case "overflow":
-		return gremlins.NewOverflowGremlin(prm.PayloadBytes, p, opt), nil
+		g := gremlins.NewOverflowGremlin(prm.PayloadBytes, p, opt)
+		g.Placement = prm.InjectionPlacement
+		return g, nil
 	case "timeout":
 		return gremlins.NewTimeoutGremlin(prm.MinTimeoutMs, prm.MaxTimeoutMs, p, opt), nil
 	default:

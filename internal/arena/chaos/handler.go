@@ -36,7 +36,7 @@ const toolCallMethod = "tools/call"
 type targetCount struct{ called, injected int }
 
 type placer interface {
-	PlacementFor(original *protocol.Message) string
+	PlacementFor(original, modified *protocol.Message) string
 }
 
 type HandlerOption func(*GremlinHandler)
@@ -124,7 +124,7 @@ func (h *GremlinHandler) HandleMessage(ctx context.Context, msg *protocol.Messag
 
 		placement := ""
 		if p, ok := g.(placer); ok {
-			placement = p.PlacementFor(msg)
+			placement = p.PlacementFor(msg, modified)
 		}
 		h.record(g.Name(), msg, modified, mctx, placement)
 		h.tally(target, func(c *targetCount) { c.injected++ })

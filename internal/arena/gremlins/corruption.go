@@ -17,8 +17,9 @@ const (
 )
 
 type CorruptionGremlin struct {
-	Mode        CorruptionMode `json:"mode"`
-	Probability float64        `json:"probability"`
+	Mode CorruptionMode `json:"mode"`
+	Placed
+	Probability float64 `json:"probability"`
 	rng         *rng
 }
 
@@ -62,6 +63,7 @@ func (g *CorruptionGremlin) Inject(_ context.Context, msg *protocol.Message) (*p
 		return msg, false, nil
 	}
 
+	modResp.Result = g.place(modResp.Result)
 	modified.Response = &modResp
 	return &modified, true, nil
 }

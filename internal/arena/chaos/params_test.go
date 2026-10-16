@@ -220,7 +220,7 @@ func TestGremlinParams_DelayAndWindowAreIndependentlySettable(t *testing.T) {
 func TestBuildGremlinsWithParams_InjectionPlacement(t *testing.T) {
 	_, err := BuildGremlinsWithParams([]string{"timeout"}, 1, IntensityCertain, GremlinParams{InjectionPlacement: "content"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "applies to the injection gremlin")
+	assert.Contains(t, err.Error(), "none of which is in [timeout]")
 
 	events := &memEvents{}
 	obs := NewObserver(events, zerolog.Nop())
@@ -239,4 +239,24 @@ func TestBuildGremlinsWithParams_InjectionPlacement(t *testing.T) {
 		placements[i] = d.Placement
 	}
 	assert.Equal(t, []string{"content", "field"}, placements, "the event says where the payload went, fallback included")
+}
+
+func TestBuildGremlinsWithParams_ContentPlacementReachesEveryResultRewriter(t *testing.T) {
+	for _, name := range PlacedGremlins() {
+		t.Run(name, func(t *testing.T) {
+			events := &memEvents{}
+			obs := NewObserver(events, zerolog.Nop())
+			gs, err := BuildGremlinsWithParams([]string{name}, 1, IntensityCertain,
+				GremlinParams{InjectionPlacement: "content", PayloadBytes: 64})
+			require.NoError(t, err)
+			feed(t, []step{call(1, "list_notes"), reply(1, okResult), call(2, "list_notes")},
+				NewGremlinHandler(gs, obs, zerolog.Nop()), obs)
+
+			got := events.all()
+			require.Len(t, got, 1)
+			var d models.EventDetails
+			require.NoError(t, json.Unmarshal(got[0].Details, &d))
+			assert.Equal(t, "content", d.Placement)
+		})
+	}
 }

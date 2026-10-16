@@ -363,9 +363,9 @@ the agent can have changed, and `--max-turns` bounds the fix loop.
   [`docs/demo/report-http.json`](docs/demo/report-http.json) is such a case. Set
   `injection_placement: content` in the scenario's `params` to append the payload to `content`
   instead, where the model reads it ([report](docs/demo/report-injection-content.json));
-  see [`docs/arena.md`](docs/arena.md). `identity`, `loop`, `overflow` and
-  `corruption` (`wrong_types`) replace the result with an object that has no `content` at all,
-  and have no such param yet: through Claude Code the model sees an empty result.
+  see [`docs/arena.md`](docs/arena.md). `identity`, `loop`, `overflow` and `corruption`
+  replace the result with an object that may have no `content` at all, so through Claude Code
+  the model sees an empty result; the same param hands their rewrite to the model as text.
 - **The 30-second observation window is not calibrated** on real traffic yet. Tune it per
   scenario with `window`.
 - **Scores vary between runs**, as explained above.
