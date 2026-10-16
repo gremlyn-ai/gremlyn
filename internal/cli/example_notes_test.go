@@ -205,6 +205,16 @@ func TestExampleNotesServer_TargetToolsAimTheTimeout(t *testing.T) {
 	assert.Equal(t, 1, aimed.Coverage.Injected, "failures: %v", aimed.Failures)
 	assert.Equal(t, []string{"create_note"}, tools, "the read before the write passes untouched")
 	assert.Equal(t, before+1, countNotes(t, url), "the timeout held the answer, not the write")
+	require.Len(t, aimed.Targets, 1)
+	assert.Equal(t, chaos.ListingListed, aimed.Targets[0].Listing)
+	assert.Equal(t, 1, aimed.Targets[0].Called)
+
+	both, _ := runAimed(t, "", cfg, sc, targetTools{"create_note", "delete_note"})
+	assert.True(t, both.Report.Measured)
+	assert.Contains(t, both.Failures, `target "delete_note" was never called, so no gremlin reached it`)
+
+	typo, _ := runAimed(t, "", cfg, sc, targetTools{"create_notes"})
+	assert.Contains(t, typo.Failures, `target "create_notes" is not offered by the server: no tools/list the run saw lists it (check the name)`)
 
 	all, tools := runAimed(t, "", cfg, sc, nil)
 	assert.Equal(t, 2, all.Coverage.Injected, "failures: %v", all.Failures)

@@ -1,13 +1,74 @@
 package chaos
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/gremlyn-ai/gremlyn/internal/arena/gremlins"
+	"github.com/gremlyn-ai/gremlyn/pkg/models"
 )
+
+type ListingState string
+
+const (
+	ListingListed     ListingState = "listed"
+	ListingNotListed  ListingState = "not_listed"
+	ListingUnverified ListingState = "unverified"
+)
+
+type TargetState string
+
+const (
+	TargetNeverCalled TargetState = "never_called"
+	TargetNotInjected TargetState = "not_injected"
+	TargetUnobserved  TargetState = "unobserved"
+	TargetScored      TargetState = "scored"
+)
+
+type TargetStat struct {
+	Name     string       `json:"name"`
+	Called   int          `json:"called"`
+	Injected int          `json:"injected"`
+	Listing  ListingState `json:"listing"`
+	ListedAs string       `json:"listed_as,omitempty"`
+}
+
+type TargetResult struct {
+	TargetStat
+	Scored int         `json:"scored"`
+	State  TargetState `json:"state"`
+}
+
+func ResolveTargets(stats []TargetStat, events []models.ArenaEvent) []TargetResult {
+	if stats == nil {
+		return nil
+	}
+	out := make([]TargetResult, len(stats))
+	for i, s := range stats {
+		r := TargetResult{TargetStat: s}
+		for j := range events {
+			var d models.EventDetails
+			if events[j].Outcome != models.OutcomeUnmeasured && json.Unmarshal(events[j].Details, &d) == nil && d.Tool == s.Name {
+				r.Scored++
+			}
+		}
+		switch {
+		case s.Called == 0:
+			r.State = TargetNeverCalled
+		case s.Injected == 0:
+			r.State = TargetNotInjected
+		case r.Scored == 0:
+			r.State = TargetUnobserved
+		default:
+			r.State = TargetScored
+		}
+		out[i] = r
+	}
+	return out
+}
 
 func ValidateTargets(targets []string, gs []gremlins.Gremlin) error {
 	if len(targets) == 0 {

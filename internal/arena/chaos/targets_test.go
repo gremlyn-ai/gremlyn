@@ -2,11 +2,15 @@ package chaos
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gremlyn-ai/gremlyn/internal/arena/gremlins"
+	"github.com/gremlyn-ai/gremlyn/pkg/models"
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
 	"github.com/gremlyn-ai/gremlyn/pkg/proxy"
 	"github.com/rs/zerolog"
@@ -201,4 +205,134 @@ func TestValidateTargets(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
+}
+
+func listing(id int, cursor string, names ...string) []step {
+	tools := make([]string, len(names))
+	for i, n := range names {
+		tools[i] = fmt.Sprintf(`{"name":%q}`, n)
+	}
+	next := ""
+	if cursor != "" {
+		next = fmt.Sprintf(`,"nextCursor":%q`, cursor)
+	}
+	return []step{
+		{true, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"tools/list","params":{}}`, id)},
+		{false, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"tools":[%s]%s}}`, id, strings.Join(tools, ","), next)},
+	}
+}
+
+func feed(t *testing.T, h *GremlinHandler, steps []step) {
+	t.Helper()
+	pipeline := proxy.NewPipeline(zerolog.Nop())
+	t.Cleanup(pipeline.Close)
+	pipeline.RegisterHandler(h)
+	for _, s := range steps {
+		msg, err := protocol.ParseMessage([]byte(s.raw))
+		require.NoError(t, err)
+		dir := models.DirectionIncoming
+		if s.outgoing {
+			dir = models.DirectionOutgoing
+		}
+		_, _, err = pipeline.Process(context.Background(), msg, &proxy.MessageContext{Direction: dir})
+		require.NoError(t, err)
+	}
+}
+
+func TestGremlinHandler_TargetStats(t *testing.T) {
+	onResponses := &fakeGremlin{name: "on-responses", fn: func(_ context.Context, m *protocol.Message) (*protocol.Message, bool, error) {
+		if m.Response == nil {
+			return m, false, nil
+		}
+		return cloneResponse(m, `{}`), true, nil
+	}}
+	never := &fakeGremlin{name: "never", fn: func(_ context.Context, m *protocol.Message) (*protocol.Message, bool, error) {
+		return m, false, nil
+	}}
+	concat := slices.Concat[[]step]
+	createCall := []step{call(9, "create_note"), reply(9, okResult)}
+	tests := []struct {
+		name    string
+		g       gremlins.Gremlin
+		targets []string
+		steps   []step
+		want    []TargetStat
+	}{
+		{"never called, absent from a complete listing", onResponses, []string{"create_note"},
+			concat(listing(1, "", "list_notes"), []step{call(2, "list_notes"), reply(2, okResult)}),
+			[]TargetStat{{Name: "create_note", Listing: ListingNotListed}}},
+		{"called and injected, listed without annotations", onResponses, []string{"create_note"},
+			concat(listing(1, "", "create_note"), createCall),
+			[]TargetStat{{Name: "create_note", Called: 1, Injected: 1, Listing: ListingListed}}},
+		{"called, never injected", never, []string{"create_note"},
+			concat(listing(1, "", "create_note"), createCall, createCall),
+			[]TargetStat{{Name: "create_note", Called: 2, Listing: ListingListed}}},
+		{"no listing seen", onResponses, []string{"create_note"}, createCall,
+			[]TargetStat{{Name: "create_note", Called: 1, Injected: 1, Listing: ListingUnverified}}},
+		{"a page with a cursor is not a complete listing", onResponses, []string{"create_note"},
+			listing(1, "c2", "list_notes"),
+			[]TargetStat{{Name: "create_note", Listing: ListingUnverified}}},
+		{"pages and re-lists are a union", onResponses, []string{"list_notes", "delete_note", "create_note"},
+			concat(listing(1, "c2", "list_notes"), listing(2, "", "delete_note"), listing(3, "", "other")),
+			[]TargetStat{{Name: "list_notes", Listing: ListingListed}, {Name: "delete_note", Listing: ListingListed}, {Name: "create_note", Listing: ListingNotListed}}},
+		{"a result without a tools array is not a page", onResponses, []string{"create_note"},
+			[]step{{true, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`}, reply(1, `{}`)},
+			[]TargetStat{{Name: "create_note", Listing: ListingUnverified}}},
+		{"a client-prefixed name points at the listed one", onResponses, []string{"mcp__notes__create_note"},
+			listing(1, "", "create_note"),
+			[]TargetStat{{Name: "mcp__notes__create_note", Listing: ListingNotListed, ListedAs: "create_note"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := NewGremlinHandler([]gremlins.Gremlin{tt.g}, NewInjectionLog(), zerolog.Nop(), WithTargets(tt.targets))
+			feed(t, h, tt.steps)
+			assert.Equal(t, tt.want, h.Targets())
+		})
+	}
+}
+
+func TestGremlinHandler_UntargetedHasNoTargets(t *testing.T) {
+	h := NewGremlinHandler(nil, NewInjectionLog(), zerolog.Nop())
+	feed(t, h, listing(1, "", "create_note"))
+	assert.Nil(t, h.Targets())
+	assert.Nil(t, (*GremlinHandler)(nil).Targets())
+}
+
+func TestGremlinHandler_TargetCountsAreRaceFree(t *testing.T) {
+	h := NewGremlinHandler(nil, NewInjectionLog(), zerolog.Nop(), createNote)
+	var wg sync.WaitGroup
+	for i := range 50 {
+		wg.Go(func() {
+			msg, err := protocol.ParseMessage([]byte(call(i, "create_note").raw))
+			assert.NoError(t, err)
+			_, _ = h.HandleMessage(context.Background(), msg, &proxy.MessageContext{})
+			_ = h.Targets()
+		})
+	}
+	wg.Wait()
+	assert.Equal(t, 50, h.Targets()[0].Called)
+}
+
+func TestResolveTargets(t *testing.T) {
+	event := func(tool string, outcome models.ArenaOutcome) models.ArenaEvent {
+		return models.ArenaEvent{Outcome: outcome, Details: json.RawMessage(fmt.Sprintf(`{"tool":%q}`, tool))}
+	}
+	events := []models.ArenaEvent{
+		event("create_note", models.OutcomeSurvived),
+		event("create_note", models.OutcomeUnmeasured),
+		event("delete_note", models.OutcomeUnmeasured),
+		{Outcome: models.OutcomeSurvived},
+	}
+	stats := []TargetStat{
+		{Name: "list_notes"},
+		{Name: "read_note", Called: 2},
+		{Name: "delete_note", Called: 1, Injected: 1},
+		{Name: "create_note", Called: 1, Injected: 1},
+	}
+	got := ResolveTargets(stats, events)
+	require.Len(t, got, 4)
+	assert.Equal(t, []TargetState{TargetNeverCalled, TargetNotInjected, TargetUnobserved, TargetScored},
+		[]TargetState{got[0].State, got[1].State, got[2].State, got[3].State})
+	assert.Equal(t, 1, got[3].Scored, "an unmeasured event is not a score")
+	assert.Nil(t, ResolveTargets(nil, events))
 }

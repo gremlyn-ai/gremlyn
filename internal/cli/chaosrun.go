@@ -35,6 +35,7 @@ type chaosRun struct {
 	setup     chaosSetup
 	pipeline  *proxy.Pipeline
 	observer  *chaos.Observer
+	handler   *chaos.GremlinHandler
 	eventSink *chaos.FileEventSink
 	session   *chaosSessionRecorder
 	logger    zerolog.Logger
@@ -88,7 +89,8 @@ func newChaosRun(ctx context.Context, setup chaosSetup, logger zerolog.Logger) (
 	}
 	r.observer = chaos.NewObserver(combineEventSinks(sinks), logger,
 		chaos.WithWindow(window), chaos.WithAnnotationOverrides(setup.Annotations))
-	r.pipeline.RegisterHandler(chaos.NewGremlinHandler(gs, r.observer, logger, chaos.WithTargets(setup.TargetTools)))
+	r.handler = chaos.NewGremlinHandler(gs, r.observer, logger, chaos.WithTargets(setup.TargetTools))
+	r.pipeline.RegisterHandler(r.handler)
 	r.pipeline.RegisterHandler(r.observer)
 
 	logger.Info().
@@ -121,6 +123,7 @@ func (r *chaosRun) finish(ctx context.Context, runErr error, ended bool, upstrea
 			Intensity:     r.setup.Intensity,
 			Params:        r.setup.Params,
 			TargetTools:   r.setup.TargetTools,
+			Targets:       r.handler.Targets(),
 			ServerCommand: r.setup.ServerCommand,
 			ServerURL:     r.setup.ServerURL,
 			Upstream:      upstream,

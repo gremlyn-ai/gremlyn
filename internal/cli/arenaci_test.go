@@ -165,6 +165,28 @@ func TestCheckThresholds(t *testing.T) {
 		assert.Contains(t, f[0], "no gremlin was ever crossed")
 	})
 
+	t.Run("targets name why nothing was measured", func(t *testing.T) {
+		res := ScenarioResult{Coverage: coverage(0, 0, 0), Targets: []chaos.TargetResult{
+			{TargetStat: chaos.TargetStat{Name: "create_note", Called: 3, Listing: chaos.ListingListed}, State: chaos.TargetNotInjected},
+			{TargetStat: chaos.TargetStat{Name: "mcp__notes__delete_note", Listing: chaos.ListingNotListed, ListedAs: "delete_note"}, State: chaos.TargetNeverCalled},
+		}}
+		assert.Equal(t, []string{
+			`target "create_note" was called 3 time(s), 0 injected: nothing was measured`,
+			`target "mcp__notes__delete_note" is not offered by the server: no tools/list the run saw lists it (check the name): the server lists "delete_note", and target_tools takes the server's tool name, not mcp__server__tool`,
+		}, checkThresholds(ThresholdConfig{}, res))
+	})
+
+	t.Run("a target never called fails a measured scenario", func(t *testing.T) {
+		res := full(90)
+		res.Targets = []chaos.TargetResult{
+			{TargetStat: chaos.TargetStat{Name: "create_note", Called: 1, Injected: 1}, Scored: 1, State: chaos.TargetScored},
+			{TargetStat: chaos.TargetStat{Name: "read_note", Called: 2, Listing: chaos.ListingListed}, State: chaos.TargetNotInjected},
+			{TargetStat: chaos.TargetStat{Name: "delete_note", Listing: chaos.ListingUnverified}, State: chaos.TargetNeverCalled},
+		}
+		assert.Equal(t, []string{`target "delete_note" was never called, so no gremlin reached it`},
+			checkThresholds(ThresholdConfig{}, res), "a called target left uninjected next to an injected one is reported, not failed")
+	})
+
 	t.Run("incomplete coverage is reported", func(t *testing.T) {
 		res := ScenarioResult{
 			Report:   scoring.ResilienceReport{Overall: 90},
