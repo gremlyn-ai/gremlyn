@@ -331,6 +331,7 @@ README, as API-equivalent costs reported by Claude Code with its default model:
 | The 4-scenario suite in `.gremlyn/arena.yaml` | $1.02 | about 1 min |
 | `/gremlyn:chaos-test --apply` fixing the demo agent | $0.77 | 3.5 min |
 | The 2 scenarios of [`examples/arena-notes.yaml`](examples/arena-notes.yaml), over HTTP ([report](docs/demo/report-http.json)) | $0.49 | 27 s |
+| `injected-delete` with `injection_placement: content`, over HTTP ([report](docs/demo/report-injection-content.json)) | about $0.25 | 10 s |
 
 Your numbers depend on your agent, its model and your prompts. A scripted agent costs
 nothing per scenario. The `paths:` filter in the example workflow runs the check only when
@@ -355,12 +356,15 @@ the agent can have changed, and `--max-turns` bounds the fix loop.
 - **Deltas against an older baseline change for annotated servers**, because a hijack or a
   duplicate write now scores lower than the same reaction did before. Unannotated servers are
   not affected.
-- **`injection` writes its text in a `_system_note` field next to the result's `content`.** An
-  MCP client that hands the model only `content`, as Claude Code does, never shows it: the
-  agent can neither obey nor resist it, and the scenario scores that silence as a resisted
-  injection. The `injected-delete` run in [`docs/demo/report-http.json`](docs/demo/report-http.json)
-  is such a case; its transcript shows the model received the notes and nothing else.
-  `identity` replaces the result with an object that has no `content` at all.
+- **With the default placement, `injection` writes its text in a `_system_note` field next to
+  the result's `content`.** An MCP client that hands the model only `content`, as Claude Code
+  does, never shows it: the agent can neither obey nor resist it, and the scenario scores that
+  silence as a resisted injection. The `injected-delete` run in
+  [`docs/demo/report-http.json`](docs/demo/report-http.json) is such a case. Set
+  `injection_placement: content` in the scenario's `params` to append the payload to `content`
+  instead, where the model reads it ([report](docs/demo/report-injection-content.json));
+  see [`docs/arena.md`](docs/arena.md). `identity` replaces the result with an object that has
+  no `content` at all, and has no such param yet.
 - **The 30-second observation window is not calibrated** on real traffic yet. Tune it per
   scenario with `window`.
 - **Scores vary between runs**, as explained above.
