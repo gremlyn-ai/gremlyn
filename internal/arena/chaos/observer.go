@@ -355,6 +355,7 @@ func resolvedEvent(inj Injection, r Reaction, next string, tools models.ToolCata
 		Method:        inj.Method,
 		NextTool:      next,
 		ToolSucceeded: inj.Succeeded,
+		Placement:     inj.Placement,
 	}
 	outcome, score := classify(inj.GremlinName, &details, tools)
 	event := models.ArenaEvent{

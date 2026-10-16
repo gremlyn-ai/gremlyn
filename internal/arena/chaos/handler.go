@@ -118,7 +118,11 @@ func (h *GremlinHandler) HandleMessage(ctx context.Context, msg *protocol.Messag
 			continue
 		}
 
-		h.record(g.Name(), msg, modified, mctx)
+		placement := ""
+		if ig, ok := g.(*gremlins.InjectionGremlin); ok && ig.Placement == gremlins.PlacementContent {
+			placement = gremlins.PlacementOf(modified)
+		}
+		h.record(g.Name(), msg, modified, mctx, placement)
 		h.tally(target, func(c *targetCount) { c.injected++ })
 
 		return &proxy.Decision{
@@ -131,7 +135,7 @@ func (h *GremlinHandler) HandleMessage(ctx context.Context, msg *protocol.Messag
 	return &proxy.Decision{Action: proxy.DecisionSkip}, nil
 }
 
-func (h *GremlinHandler) record(name string, original, modified *protocol.Message, mctx *proxy.MessageContext) {
+func (h *GremlinHandler) record(name string, original, modified *protocol.Message, mctx *proxy.MessageContext, placement string) {
 	if h.sink == nil {
 		return
 	}
@@ -144,6 +148,7 @@ func (h *GremlinHandler) record(name string, original, modified *protocol.Messag
 		Method:      correlatedMethod(original, mctx),
 		Tool:        correlatedTool(original, mctx),
 		Succeeded:   succeeded(original),
+		Placement:   placement,
 		InjectedAt:  h.now(),
 		Original:    original,
 		Modified:    modified,
