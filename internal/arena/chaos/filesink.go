@@ -57,6 +57,7 @@ type SessionSummary struct {
 	Seed          int64              `json:"seed"`
 	Intensity     string             `json:"intensity,omitempty"`
 	Params        GremlinParams      `json:"params,omitempty"`
+	TargetTools   []string           `json:"target_tools,omitempty"`
 	ServerCommand []string           `json:"server_command,omitempty"`
 	ServerURL     string             `json:"server_url,omitempty"`
 	Upstream      UpstreamStats      `json:"upstream,omitzero"`

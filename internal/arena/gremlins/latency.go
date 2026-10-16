@@ -10,7 +10,6 @@ import (
 type LatencyGremlin struct {
 	MinDelayMs  int     `json:"min_delay_ms"`
 	MaxDelayMs  int     `json:"max_delay_ms"`
-	TargetTool  string  `json:"target_tool,omitempty"`
 	Probability float64 `json:"probability"`
 	rng         *rng
 }
