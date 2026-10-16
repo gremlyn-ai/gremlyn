@@ -126,6 +126,7 @@ func TestWriteMCPConfig_PassesTheAnnotationOverrides(t *testing.T) {
 	data, err = os.ReadFile(path)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "--chaos-annotations")
+	assert.NotContains(t, string(data), "--chaos-target-tool")
 }
 
 func TestWrapCmd_RejectsAnnotationsItCannotUse(t *testing.T) {

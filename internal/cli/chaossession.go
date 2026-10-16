@@ -21,6 +21,7 @@ type chaosRecipe struct {
 	Intensity   string                            `json:"intensity,omitempty"`
 	Params      chaos.GremlinParams               `json:"params,omitempty"`
 	Annotations map[string]models.ToolAnnotations `json:"annotations,omitempty"`
+	TargetTools []string                          `json:"target_tools,omitempty"`
 	Server      []string                          `json:"server_command,omitempty"`
 	ServerURL   string                            `json:"server_url,omitempty"`
 }

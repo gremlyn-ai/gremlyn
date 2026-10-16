@@ -73,6 +73,9 @@ func replayCommand(s chaos.SessionSummary) (string, error) {
 		}
 		parts = append(parts, "--chaos-params "+shellArg(string(encoded)))
 	}
+	for _, t := range s.TargetTools {
+		parts = append(parts, "--chaos-target-tool "+shellArg(t))
+	}
 	if overrides := chaos.ConfigOverrides(s.Tools); len(overrides) > 0 {
 		encoded, err := json.Marshal(overrides)
 		if err != nil {

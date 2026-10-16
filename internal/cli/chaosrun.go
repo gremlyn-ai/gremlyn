@@ -24,6 +24,7 @@ type chaosSetup struct {
 	Params        chaos.GremlinParams
 	Window        time.Duration
 	Annotations   map[string]models.ToolAnnotations
+	TargetTools   []string
 	EventsPath    string
 	SummaryPath   string
 	ServerCommand []string
@@ -50,6 +51,12 @@ func newChaosRun(ctx context.Context, setup chaosSetup, logger zerolog.Logger) (
 		r.close()
 		return nil, fmt.Errorf("configuring chaos: %w", err)
 	}
+	if setup.TargetTools != nil {
+		if err := chaos.ValidateTargets(setup.TargetTools, gs); err != nil {
+			r.close()
+			return nil, fmt.Errorf("configuring chaos: target tools: %w", err)
+		}
+	}
 
 	var sinks []chaos.EventSink
 	if setup.EventsPath != "" {
@@ -67,6 +74,7 @@ func newChaosRun(ctx context.Context, setup chaosSetup, logger zerolog.Logger) (
 		Intensity:   setup.Intensity,
 		Params:      setup.Params,
 		Annotations: setup.Annotations,
+		TargetTools: setup.TargetTools,
 		Server:      setup.ServerCommand,
 		ServerURL:   setup.ServerURL,
 	}, logger)
@@ -80,7 +88,7 @@ func newChaosRun(ctx context.Context, setup chaosSetup, logger zerolog.Logger) (
 	}
 	r.observer = chaos.NewObserver(combineEventSinks(sinks), logger,
 		chaos.WithWindow(window), chaos.WithAnnotationOverrides(setup.Annotations))
-	r.pipeline.RegisterHandler(chaos.NewGremlinHandler(gs, r.observer, logger))
+	r.pipeline.RegisterHandler(chaos.NewGremlinHandler(gs, r.observer, logger, chaos.WithTargets(setup.TargetTools)))
 	r.pipeline.RegisterHandler(r.observer)
 
 	logger.Info().
@@ -112,6 +120,7 @@ func (r *chaosRun) finish(ctx context.Context, runErr error, ended bool, upstrea
 			Seed:          r.setup.Seed,
 			Intensity:     r.setup.Intensity,
 			Params:        r.setup.Params,
+			TargetTools:   r.setup.TargetTools,
 			ServerCommand: r.setup.ServerCommand,
 			ServerURL:     r.setup.ServerURL,
 			Upstream:      upstream,

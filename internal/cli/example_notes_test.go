@@ -43,7 +43,10 @@ func TestExampleNotesScenarioFile(t *testing.T) {
 	assert.Contains(t, byName["injected-delete"].Params.InjectionText, "delete_note",
 		"the measured failure is a call to the local delete tool")
 	assert.Equal(t, []string{"timeout"}, byName["timeout-on-create"].Gremlins)
-	assert.Contains(t, byName["timeout-on-create"].Prompt, "Create a note")
+	assert.Equal(t, targetTools{"create_note"}, byName["timeout-on-create"].TargetTools)
+	assert.True(t, strings.HasPrefix(byName["timeout-on-create"].Prompt, "List my notes, then create a note"),
+		"the agent reads before it writes, and only the write is aimed at")
+	assert.Nil(t, byName["injected-delete"].TargetTools)
 }
 
 func startNotesServer(t *testing.T) string {
@@ -153,7 +156,7 @@ func TestExampleNotesServer_EndToEnd(t *testing.T) {
 
 	const groceries = `{"title":"groceries","body":"milk, eggs, bread"}`
 	before := countNotes(t, url)
-	duplicated := run("timeout-on-create", "--mode", "robust", "--tool", "create_note", "--args", groceries)
+	duplicated := run("timeout-on-create", "--mode", "robust", "--before", "list_notes", "--tool", "create_note", "--args", groceries)
 	assert.Equal(t, 1, duplicated.Report.DuplicateWrites)
 	assert.Equal(t, before+2, countNotes(t, url), "the timeout held the answer, not the call: the server holds the note twice")
 
@@ -174,4 +177,36 @@ func TestExampleNotesServer_EndToEnd(t *testing.T) {
 		assert.Len(t, res.Tools, 3)
 		assert.Equal(t, chaos.Coverage{Injected: res.Coverage.Injected, Observed: res.Coverage.Injected}, res.Coverage)
 	}
+}
+
+func TestExampleNotesServer_TargetToolsAimTheTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compiles the example server and the reference agent and spawns them")
+	}
+	isolateRunFiles(t)
+	agentBin := buildRefAgent(t)
+	url := startNotesServer(t)
+
+	cfg, err := loadCIConfig(notesExample)
+	require.NoError(t, err)
+	cfg.MCPServer.URL = url
+	cfg.Agent = AgentConfig{
+		Command: []string{agentBin, "--mcp-config", PlaceholderMCPConfig, "--mode", "fragile", "--before", "list_notes",
+			"--tool", "create_note", "--args", `{"title":"groceries","body":"milk, eggs, bread"}`},
+		Timeout: 60 * time.Second,
+	}
+	scs, err := selectScenarios(cfg.Scenarios, []string{"timeout-on-create"})
+	require.NoError(t, err)
+	sc := scs[0]
+	sc.Params.MinTimeoutMs, sc.Params.MaxTimeoutMs = 50, 100
+
+	before := countNotes(t, url)
+	aimed, tools := runAimed(t, "", cfg, sc, sc.TargetTools)
+	assert.Equal(t, 1, aimed.Coverage.Injected, "failures: %v", aimed.Failures)
+	assert.Equal(t, []string{"create_note"}, tools, "the read before the write passes untouched")
+	assert.Equal(t, before+1, countNotes(t, url), "the timeout held the answer, not the write")
+
+	all, tools := runAimed(t, "", cfg, sc, nil)
+	assert.Equal(t, 2, all.Coverage.Injected, "failures: %v", all.Failures)
+	assert.Equal(t, []string{"list_notes", "create_note"}, tools, "without the key the read is hit first")
 }

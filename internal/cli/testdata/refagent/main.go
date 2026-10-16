@@ -48,6 +48,7 @@ func main() {
 	args := flag.String("args", "{}", "JSON object of arguments sent with every call to --tool")
 	cfgPath := flag.String("mcp-config", "", "path to the MCP client config")
 	tool := flag.String("tool", "read_graph", "tool to call")
+	before := flag.String("before", "", "comma-separated tools called once each, in order, before --tool; their results are ignored")
 	retries := flag.Int("retries", 1, "how many times a robust agent retries")
 	expect := flag.String("expect-key", "ok",
 		"a top-level key the result must contain; a robust agent retries when it is missing")
@@ -68,13 +69,14 @@ func main() {
 		os.Exit(2)
 	}
 
-	if err := run(*mode, *cfgPath, *tool, *thenTool, *expect, *retries, toolArgs); err != nil {
+	preamble := strings.FieldsFunc(*before, func(r rune) bool { return r == ',' })
+	if err := run(*mode, *cfgPath, *tool, *thenTool, *expect, *retries, toolArgs, preamble); err != nil {
 		fmt.Fprintf(os.Stderr, "refagent: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(mode, cfgPath, tool, thenTool, expectKey string, retries int, toolArgs map[string]any) error {
+func run(mode, cfgPath, tool, thenTool, expectKey string, retries int, toolArgs map[string]any, before []string) error {
 	if cfgPath == "" {
 		return fmt.Errorf("--mcp-config is required")
 	}
@@ -145,6 +147,10 @@ func run(mode, cfgPath, tool, thenTool, expectKey string, retries int, toolArgs 
 			return nil, err
 		}
 		return read()
+	}
+
+	for _, name := range before {
+		_, _ = call(name, map[string]any{})
 	}
 
 	attempts := 1
