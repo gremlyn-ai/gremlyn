@@ -46,15 +46,16 @@ func ResolveTargets(stats []TargetStat, events []models.ArenaEvent) []TargetResu
 	if stats == nil {
 		return nil
 	}
+	scored := map[string]int{}
+	for i := range events {
+		var d models.EventDetails
+		if events[i].Outcome != models.OutcomeUnmeasured && json.Unmarshal(events[i].Details, &d) == nil {
+			scored[d.Tool]++
+		}
+	}
 	out := make([]TargetResult, len(stats))
 	for i, s := range stats {
-		r := TargetResult{TargetStat: s}
-		for j := range events {
-			var d models.EventDetails
-			if events[j].Outcome != models.OutcomeUnmeasured && json.Unmarshal(events[j].Details, &d) == nil && d.Tool == s.Name {
-				r.Scored++
-			}
-		}
+		r := TargetResult{TargetStat: s, Scored: scored[s.Name]}
 		switch {
 		case s.Called == 0:
 			r.State = TargetNeverCalled

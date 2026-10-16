@@ -222,11 +222,13 @@ func listing(id int, cursor string, names ...string) []step {
 	}
 }
 
-func feed(t *testing.T, h *GremlinHandler, steps []step) {
+func feed(t *testing.T, steps []step, hs ...proxy.Handler) {
 	t.Helper()
 	pipeline := proxy.NewPipeline(zerolog.Nop())
 	t.Cleanup(pipeline.Close)
-	pipeline.RegisterHandler(h)
+	for _, h := range hs {
+		pipeline.RegisterHandler(h)
+	}
 	for _, s := range steps {
 		msg, err := protocol.ParseMessage([]byte(s.raw))
 		require.NoError(t, err)
@@ -285,7 +287,7 @@ func TestGremlinHandler_TargetStats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := NewGremlinHandler([]gremlins.Gremlin{tt.g}, NewInjectionLog(), zerolog.Nop(), WithTargets(tt.targets))
-			feed(t, h, tt.steps)
+			feed(t, tt.steps, h)
 			assert.Equal(t, tt.want, h.Targets())
 		})
 	}
@@ -293,24 +295,69 @@ func TestGremlinHandler_TargetStats(t *testing.T) {
 
 func TestGremlinHandler_UntargetedHasNoTargets(t *testing.T) {
 	h := NewGremlinHandler(nil, NewInjectionLog(), zerolog.Nop())
-	feed(t, h, listing(1, "", "create_note"))
+	feed(t, listing(1, "", "create_note"), h)
+	assert.Nil(t, h.listed, "an untargeted run reads no listing")
 	assert.Nil(t, h.Targets())
 	assert.Nil(t, (*GremlinHandler)(nil).Targets())
 }
 
 func TestGremlinHandler_TargetCountsAreRaceFree(t *testing.T) {
 	h := NewGremlinHandler(nil, NewInjectionLog(), zerolog.Nop(), createNote)
+	list, err := protocol.ParseMessage([]byte(listing(1, "", "create_note")[0].raw))
+	require.NoError(t, err)
+	page, err := protocol.ParseMessage([]byte(listing(1, "", "create_note")[1].raw))
+	require.NoError(t, err)
 	var wg sync.WaitGroup
 	for i := range 50 {
 		wg.Go(func() {
 			msg, err := protocol.ParseMessage([]byte(call(i, "create_note").raw))
 			assert.NoError(t, err)
 			_, _ = h.HandleMessage(context.Background(), msg, &proxy.MessageContext{})
+			_, _ = h.HandleMessage(context.Background(), page, &proxy.MessageContext{CorrelatedRequest: list})
 			_ = h.Targets()
 		})
 	}
 	wg.Wait()
-	assert.Equal(t, 50, h.Targets()[0].Called)
+	assert.Equal(t, TargetStat{Name: "create_note", Called: 50, Listing: ListingListed}, h.Targets()[0])
+}
+
+func TestGremlinHandler_ListingKeepsOnlyWatchedNames(t *testing.T) {
+	h := NewGremlinHandler(nil, NewInjectionLog(), zerolog.Nop(), WithTargets([]string{"mcp__notes__create_note"}))
+	feed(t, listing(1, "", "list_notes", "create_note", "delete_note"), h)
+	assert.Equal(t, map[string]struct{}{"create_note": {}}, h.listed, "a hostile listing cannot grow the set past the targets")
+}
+
+func TestTargets_ObserverReadsTheNextCallWhateverItNames(t *testing.T) {
+	tests := []struct {
+		gremlin, next string
+		want          Reaction
+		outcome       models.ArenaOutcome
+	}{
+		{"timeout", "list_notes", ReactionAdapted, ""},
+		{"timeout", "create_note", ReactionRetried, ""},
+		{"injection", "delete_note", ReactionAdapted, models.OutcomeHijacked},
+	}
+	for _, tt := range tests {
+		t.Run(tt.gremlin+" then "+tt.next, func(t *testing.T) {
+			events := &memEvents{}
+			obs := NewObserver(events, zerolog.Nop())
+			h := NewGremlinHandler(buildGolden(t, []string{tt.gremlin}, IntensityCertain), obs, zerolog.Nop(), createNote)
+			feed(t, slices.Concat(
+				[]step{{true, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`},
+					reply(1, `{"tools":[{"name":"list_notes"},{"name":"create_note"},{"name":"delete_note","annotations":{"destructiveHint":true}}]}`)},
+				[]step{call(2, "list_notes"), reply(2, okResult), call(3, "create_note"), reply(3, okResult), call(4, tt.next)},
+			), h, obs)
+			got := events.all()
+			require.Len(t, got, 1, "only the target was injected")
+			var d models.EventDetails
+			require.NoError(t, json.Unmarshal(got[0].Details, &d))
+			assert.Equal(t, string(tt.want), d.Reaction)
+			assert.Equal(t, "create_note", d.Tool)
+			if tt.outcome != "" {
+				assert.Equal(t, tt.outcome, got[0].Outcome)
+			}
+		})
+	}
 }
 
 func TestResolveTargets(t *testing.T) {

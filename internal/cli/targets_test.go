@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,8 +173,22 @@ func TestArenaCI_Stdio_TargetToolsReachTheProxy(t *testing.T) {
 	aimed, tools := runAimed(t, gremlynBin, cfg, sc, targetTools{"read_graph"})
 	assert.Equal(t, 1, aimed.Coverage.Injected, "failures: %v", aimed.Failures)
 	assert.Equal(t, []string{"read_graph"}, tools)
+	assert.Equal(t, []chaos.TargetResult{{
+		TargetStat: chaos.TargetStat{Name: "read_graph", Called: 1, Injected: 1, Listing: chaos.ListingUnverified},
+		Scored:     1, State: chaos.TargetScored,
+	}}, aimed.Targets, "the counts cross from the wrap process through summary.json")
 
 	all, tools := runAimed(t, gremlynBin, cfg, sc, nil)
 	assert.Equal(t, 2, all.Coverage.Injected, "failures: %v", all.Failures)
 	assert.Equal(t, []string{"list_notes", "read_graph"}, tools)
+	assert.Nil(t, all.Targets)
+}
+
+func TestWriteScenarioText_Targets(t *testing.T) {
+	res := ScenarioResult{Name: "s", Targets: []chaos.TargetResult{
+		{TargetStat: chaos.TargetStat{Name: "create_note", Called: 2, Injected: 1, Listing: chaos.ListingListed}, Scored: 1, State: chaos.TargetScored},
+	}}
+	var b strings.Builder
+	writeScenarioText(&b, &res)
+	assert.Contains(t, b.String(), "  target:     create_note scored (called 2, injected 1, scored 1, listed)\n")
 }
