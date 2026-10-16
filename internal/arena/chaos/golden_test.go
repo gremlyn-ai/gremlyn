@@ -119,18 +119,23 @@ func runTranscript(t *testing.T, run string, gs []gremlins.Gremlin, steps []step
 
 func TestGremlinHandler_UntargetedOutputIsV020(t *testing.T) {
 	path := filepath.Join("testdata", "untargeted-v0.2.0.golden.jsonl")
-	var got bytes.Buffer
-	enc := json.NewEncoder(&got)
-	for _, run := range goldenRuns() {
-		for _, line := range runTranscript(t, strings.Join(run, "+"), buildGolden(t, run, IntensityMedium), goldenTranscript()) {
-			require.NoError(t, enc.Encode(line))
+	render := func(opts ...HandlerOption) []byte {
+		var got bytes.Buffer
+		enc := json.NewEncoder(&got)
+		for _, run := range goldenRuns() {
+			for _, line := range runTranscript(t, strings.Join(run, "+"), buildGolden(t, run, IntensityMedium), goldenTranscript(), opts...) {
+				require.NoError(t, enc.Encode(line))
+			}
 		}
+		return got.Bytes()
 	}
+	got := render()
 	if *update {
 		require.NoError(t, os.MkdirAll("testdata", 0o750))
-		require.NoError(t, os.WriteFile(path, got.Bytes(), 0o600))
+		require.NoError(t, os.WriteFile(path, got, 0o600))
 	}
 	want, err := os.ReadFile(path)
 	require.NoError(t, err)
-	assert.Equal(t, string(want), got.String())
+	assert.Equal(t, string(want), string(got))
+	assert.Equal(t, string(want), string(render(WithTargets(nil))))
 }

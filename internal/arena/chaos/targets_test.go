@@ -73,14 +73,14 @@ func TestGremlinHandler_NonTargetPassesThroughByteExact(t *testing.T) {
 		{"a non-target success", result, named("list_notes"), false},
 		{"a non-target JSON-RPC error", `{"jsonrpc":"2.0","id":7,"error":{"code":-32602,"message":"rejected"}}`, named("list_notes"), false},
 		{"a non-target isError result", `{"jsonrpc":"2.0","id":7,"result":{"content":[],"isError":true}}`, named("list_notes"), false},
-		{"a notification", `{"jsonrpc":"2.0","method":"notifications/progress","params":{"progressToken":1}}`, "", false},
+		{"a notification, stopped by the tool-call guard", `{"jsonrpc":"2.0","method":"notifications/progress","params":{"progressToken":1}}`, "", false},
 		{"undecodable params", req(`"oops"`), "", false},
 		{"a missing name", req(`{}`), "", false},
 		{"a non-string name", req(`{"name":5}`), "", false},
 		{"another case", named("Create_Note"), "", false},
 		{"a leading space", named(" create_note"), "", false},
 		{"a trailing space", named("create_note "), "", false},
-		{"a target response past the correlator TTL", result, "", false},
+		{"a response with no correlated request, stopped by the tool-call guard", result, "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
