@@ -9,7 +9,7 @@
 - Arena (`internal/arena/…`): `gremlins` (a shared `Placed` embedded by `corruption`, `identity`, `injection`, `loop`, `overflow`); `chaos` (`PlacedGremlins()`, the param accepted for any of them, the `placer` interface now sees the modified message)
 - CLI / plugin / Action: none
 - Formats: `injection_placement` now applies to five gremlins; `placement` is recorded in their event details when `content` was asked for
-- Score comparability: unchanged with the default `field`. A scenario of one of these gremlins switched to `content` measures a failure the model can now see, so it is a different measurement from its baseline
+- Score comparability: unchanged with the default `field`. A scenario of one of these gremlins switched to `content` measures a failure the model can now see, so it is a different measurement from its baseline. For `corruption` the measurement itself changes: the wrapped result is a valid text result, so the scenario tests a garbled answer rather than a malformed one
 
 **For users**: `params: {injection_placement: content}` on a `loop`, `identity`, `overflow` or `corruption` scenario, as on an `injection` one.
 
