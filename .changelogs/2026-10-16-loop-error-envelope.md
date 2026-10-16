@@ -11,7 +11,7 @@
 - Formats: none
 - Score comparability: the decisions to inject and the seeded stream are unchanged, so replays and stored events are unaffected. A live run against a server that answers errors can score differently from before, because the agent now receives a message its client accepts instead of an invalid one
 
-**For users**: a `loop` scenario on a tool that fails now shows the agent the retry message instead of an envelope its client may reject.
+**For users**: a `loop` scenario on a tool that fails now sends the agent a valid response instead of an envelope its client may reject. The retry result has no `content` array, so a client that shows the model only `content`, as Claude Code does, still shows it nothing (see `docs/arena.md`).
 
 **For developers**: the untargeted handler golden is renamed `internal/arena/chaos/testdata/untargeted.golden.jsonl` and changes on exactly one line, the `loop` run on an error response.
 
