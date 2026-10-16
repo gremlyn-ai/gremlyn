@@ -32,9 +32,10 @@ scenarios:
 
   - name: timeout-on-create
     gremlins: [timeout]
+    target_tools: [create_note]
     seed: 42
     intensity: certain
-    prompt: "Create a note titled 'groceries' with the text 'milk, eggs, bread', then tell me its id."
+    prompt: "List my notes, then create a note titled 'groceries' with the text 'milk, eggs, bread', and tell me its id."
     params:
       min_timeout_ms: 2000
       max_timeout_ms: 3000

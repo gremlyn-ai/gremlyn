@@ -109,6 +109,16 @@ func TestValidateCIConfig(t *testing.T) {
 		{"duplicate gremlin", func(c *CIConfig) {
 			c.Scenarios[0].Gremlins = []string{"corruption", "corruption"}
 		}, "more than once"},
+		{"valid target_tools", func(c *CIConfig) { c.Scenarios[0].TargetTools = targetTools{"create_note"} }, ""},
+		{"empty target_tools", func(c *CIConfig) { c.Scenarios[0].TargetTools = targetTools{} },
+			`scenario "s1": target_tools: the list is empty`},
+		{"duplicate target", func(c *CIConfig) { c.Scenarios[0].TargetTools = targetTools{"a", "a"} },
+			`scenario "s1": target_tools: "a" is listed twice`},
+		{"target is the hallucination fake tool", func(c *CIConfig) {
+			c.Scenarios[0].Gremlins = []string{"hallucination"}
+			c.Scenarios[0].Params.FakeTool = "ghost"
+			c.Scenarios[0].TargetTools = targetTools{"ghost"}
+		}, `"ghost" is the tool the hallucination gremlin invents`},
 	}
 
 	for _, tt := range tests {
@@ -181,7 +191,8 @@ func TestWriteMCPConfig(t *testing.T) {
 
 	err := writeMCPConfig(path, "/usr/bin/gremlyn",
 		MCPServerConfig{Name: "memory", Command: []string{"npx", "-y", "server-memory"}},
-		ScenarioConfig{Gremlins: []string{"corruption", "latency"}, Intensity: "high", Window: 45 * time.Second},
+		ScenarioConfig{Gremlins: []string{"corruption", "latency"}, Intensity: "high", Window: 45 * time.Second,
+			TargetTools: targetTools{"create_note", "a,b"}},
 		42, "/tmp/e.jsonl", "/tmp/s.json")
 	require.NoError(t, err)
 
@@ -211,6 +222,12 @@ func TestWriteMCPConfig(t *testing.T) {
 	sep := indexOf(srv.Args, "--")
 	require.Positive(t, sep, "the child command must be separated by --")
 	assert.Equal(t, []string{"npx", "-y", "server-memory"}, srv.Args[sep+1:])
+
+	flags := NewWrapCmd(zerolog.Nop()).Flags()
+	require.NoError(t, flags.Parse(srv.Args[1:sep]))
+	targets, err := flags.GetStringArray("chaos-target-tool")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"create_note", "a,b"}, targets, "each target reaches wrap as its own flag, before the child command")
 }
 
 func TestSubstitute(t *testing.T) {

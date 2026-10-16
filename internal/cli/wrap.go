@@ -31,6 +31,7 @@ func NewWrapCmd(logger zerolog.Logger) *cobra.Command {
 		chaosWindow      time.Duration
 		chaosParamsJSON  string
 		chaosAnnotations string
+		chaosTargets     []string
 		upstreamURL      string
 		upstreamHeaders  []string
 		upstreamTimeout  time.Duration
@@ -67,6 +68,9 @@ environment, so a token can stay out of the command line: single-quote the flag.
 				}
 				annotations = parsed
 			}
+			if cmd.Flags().Changed("chaos-target-tool") && len(chaosGremlins) == 0 {
+				return errors.New("--chaos-target-tool applies with --chaos-gremlins only: without a gremlin nothing is aimed")
+			}
 			setup := chaosSetup{
 				Gremlins:    chaosGremlins,
 				Seed:        chaosSeed,
@@ -74,6 +78,7 @@ environment, so a token can stay out of the command line: single-quote the flag.
 				Params:      params,
 				Window:      chaosWindow,
 				Annotations: annotations,
+				TargetTools: chaosTargets,
 				EventsPath:  chaosEventsPath,
 				SummaryPath: chaosSummaryPath,
 			}
@@ -147,6 +152,9 @@ environment, so a token can stay out of the command line: single-quote the flag.
 	cmd.Flags().StringVar(&chaosAnnotations, "chaos-annotations", "",
 		`JSON declaring tool effects the server does not annotate, scored as if the server had, e.g. `+
 			`'{"create_note":{"readOnlyHint":false,"idempotentHint":false}}'. Hints: readOnlyHint, destructiveHint, idempotentHint`)
+	cmd.Flags().StringArrayVar(&chaosTargets, "chaos-target-tool", nil,
+		"Aim the gremlins at this tool only, by its exact name as the server lists it (repeatable). "+
+			"Calls to other tools pass through untouched and draw no randomness")
 	cmd.Flags().DurationVar(&chaosWindow, "chaos-window", chaos.DefaultWindow,
 		"How long the agent has to react to an injection before silence is taken as the answer")
 

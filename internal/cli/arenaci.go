@@ -57,6 +57,8 @@ type ScenarioConfig struct {
 	Prompt    string              `yaml:"prompt"`
 	Params    chaos.GremlinParams `yaml:"params"`
 	Window    time.Duration       `yaml:"window"`
+
+	TargetTools targetTools `yaml:"target_tools"`
 }
 
 type ThresholdConfig struct {
@@ -245,8 +247,14 @@ func validateCIConfig(cfg *CIConfig) error {
 			return fmt.Errorf("scenario %q: unknown intensity %q", sc.Name, sc.Intensity)
 		}
 
-		if _, err := chaos.BuildGremlinsWithParams(sc.Gremlins, sc.Seed, intensityOf(sc), sc.Params); err != nil {
+		gs, err := chaos.BuildGremlinsWithParams(sc.Gremlins, sc.Seed, intensityOf(sc), sc.Params)
+		if err != nil {
 			return fmt.Errorf("scenario %q: %w", sc.Name, err)
+		}
+		if sc.TargetTools != nil {
+			if err := chaos.ValidateTargets(sc.TargetTools, gs); err != nil {
+				return fmt.Errorf("scenario %q: target_tools: %w", sc.Name, err)
+			}
 		}
 	}
 	if cfg.Agent.Timeout <= 0 {
@@ -413,6 +421,7 @@ func startScenarioProxy(
 		Params:      sc.Params,
 		Window:      sc.Window,
 		Annotations: srv.Annotations,
+		TargetTools: sc.TargetTools,
 		EventsPath:  eventsPath,
 		SummaryPath: summaryPath,
 	}, logger)
@@ -515,6 +524,9 @@ func writeMCPConfig(path, self string, srv MCPServerConfig, sc ScenarioConfig, s
 			return fmt.Errorf("encoding tool annotations: %w", err)
 		}
 		args = append(args, "--chaos-annotations", string(encoded))
+	}
+	for _, t := range sc.TargetTools {
+		args = append(args, "--chaos-target-tool", t)
 	}
 
 	args = append(args, "--")
