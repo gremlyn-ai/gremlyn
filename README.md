@@ -245,6 +245,22 @@ mcp_server:
     delete_item: {destructiveHint: true}
 ```
 
+**Aiming at a tool.** An agent usually reads before it writes, so with `intensity: certain`
+a gremlin meant for a write lands on the first read. `target_tools` limits a scenario's
+gremlins to the tools named, by the server's own names; every other call passes through
+untouched and does not shift the seed:
+
+```yaml
+  - name: timeout-on-create
+    gremlins: [timeout]
+    intensity: certain
+    target_tools: [create_note]
+    prompt: "List my notes, then create a note titled 'groceries' ..."
+```
+
+A target the agent never called fails the scenario, and the report tells a tool the server
+does not offer from one the agent did not call. See [`docs/arena.md`](docs/arena.md#target-tools).
+
 [`examples/notes-server`](examples/notes-server) is a small annotated HTTP server to try it
 on, with [`examples/arena-notes.yaml`](examples/arena-notes.yaml).
 

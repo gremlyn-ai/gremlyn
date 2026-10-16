@@ -118,6 +118,9 @@ environment variables to the agent. `intensity` is `low`, `medium`, `high` or `c
 Gremlins available: `timeout`, `latency`, `corruption`, `hallucination`, `injection`,
 `identity`, `overflow`, `loop`; `"$GREMLYN" arena list-gremlins` describes them. Each
 scenario's prompt must make the agent call a tool, otherwise nothing is measured.
+A scenario that tests a write should name it in `target_tools: [create_item]`, with the
+server's tool name (not `mcp__server__tool`): the agent's reads then pass untouched, and the
+gremlin lands on the write. A target the agent never calls fails the scenario.
 
 Show the user the file you wrote. In `--apply` mode, show it and carry on.
 
