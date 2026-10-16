@@ -75,6 +75,7 @@ type ScenarioResult struct {
 	Skipped  int                      `json:"skipped_partial_events"`
 	Upstream chaos.UpstreamStats      `json:"upstream,omitzero"`
 	Tools    models.ToolCatalog       `json:"tools,omitempty"`
+	Targets  []chaos.TargetResult     `json:"targets,omitempty"`
 	AgentErr string                   `json:"agent_error,omitempty"`
 	Failures []string                 `json:"failures,omitempty"`
 }
@@ -376,6 +377,7 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	res.Upstream = summary.Upstream
 	res.Tools = summary.Tools
 	res.Report = scoring.Score(chaos.Rescore(events, summary.Tools), nil)
+	res.Targets = chaos.ResolveTargets(summary.Targets, events)
 
 	res.Failures = append(res.Failures, upstreamFailures(res.Upstream)...)
 	res.Failures = append(res.Failures, checkThresholds(cfg.Thresholds, res)...)
@@ -467,10 +469,14 @@ func checkThresholds(th ThresholdConfig, res ScenarioResult) []string {
 	var failures []string
 
 	if res.Coverage.Injected == 0 {
+		if f := targetFailures(res.Targets, true); len(f) > 0 {
+			return f
+		}
 		return []string{
 			"no gremlin was ever crossed: the agent made no tool call, so nothing was tested",
 		}
 	}
+	failures = append(failures, targetFailures(res.Targets, false)...)
 	if !res.Coverage.Complete() {
 		failures = append(failures, fmt.Sprintf(
 			"coverage incomplete (%s): the score covers only part of the session", res.Coverage))
@@ -625,6 +631,9 @@ func writeScenarioText(w io.Writer, sc *ScenarioResult) {
 	_, _ = fmt.Fprintf(w, "%s  %s\n", status, p.bold(sc.Name))
 	_, _ = fmt.Fprintf(w, "  resilience: %s\n", p.grade(sc.Report.Grade, fmt.Sprintf("%d (%s)", sc.Report.Overall, sc.Report.Grade)))
 	_, _ = fmt.Fprintf(w, "  coverage:   %s\n", sc.Coverage)
+	for _, t := range sc.Targets {
+		_, _ = fmt.Fprintf(w, "  target:     %s\n", targetLine(t))
+	}
 	if sc.Skipped > 0 {
 		_, _ = fmt.Fprintf(w, "  lost:       %d truncated event(s)\n", sc.Skipped)
 	}

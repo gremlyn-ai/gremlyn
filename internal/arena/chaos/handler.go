@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +20,10 @@ import (
 type GremlinHandler struct {
 	gremlins []gremlins.Gremlin
 	targets  []string
+	counts   []targetCount
+	listed   map[string]struct{}
+	complete bool
+	mu       sync.Mutex
 	sink     InjectionSink
 	logger   zerolog.Logger
 	now      func() time.Time
@@ -25,6 +31,8 @@ type GremlinHandler struct {
 }
 
 const toolCallMethod = "tools/call"
+
+type targetCount struct{ called, injected int }
 
 type HandlerOption func(*GremlinHandler)
 
@@ -37,7 +45,10 @@ func WithIDGenerator(newID func() string) HandlerOption {
 }
 
 func WithTargets(names []string) HandlerOption {
-	return func(h *GremlinHandler) { h.targets = slices.Clone(names) }
+	return func(h *GremlinHandler) {
+		h.targets = slices.Clone(names)
+		h.counts = make([]targetCount, len(names))
+	}
 }
 
 func NewGremlinHandler(ordered []gremlins.Gremlin, sink InjectionSink, logger zerolog.Logger, opts ...HandlerOption) *GremlinHandler {
@@ -61,12 +72,24 @@ func (h *GremlinHandler) HandleMessage(ctx context.Context, msg *protocol.Messag
 		return &proxy.Decision{Action: proxy.DecisionSkip}, nil
 	}
 
+	if h.targets != nil {
+		h.noteListing(msg, mctx)
+	}
+
 	if !isToolCall(msg, mctx) {
 		return &proxy.Decision{Action: proxy.DecisionSkip}, nil
 	}
 
-	if h.targets != nil && !h.aimed(msg, mctx) {
-		return &proxy.Decision{Action: proxy.DecisionSkip}, nil
+	target := -1
+	if h.targets != nil {
+		if target = slices.Index(h.targets, correlatedTool(msg, mctx)); target < 0 {
+			return &proxy.Decision{Action: proxy.DecisionSkip}, nil
+		}
+		h.tally(target, func(c *targetCount) {
+			if msg.GetMethod() == toolCallMethod {
+				c.called++
+			}
+		})
 	}
 
 	for _, g := range h.gremlins {
@@ -88,6 +111,7 @@ func (h *GremlinHandler) HandleMessage(ctx context.Context, msg *protocol.Messag
 		}
 
 		h.record(g.Name(), msg, modified, mctx)
+		h.tally(target, func(c *targetCount) { c.injected++ })
 
 		return &proxy.Decision{
 			Action:          proxy.DecisionModify,
@@ -119,8 +143,68 @@ func (h *GremlinHandler) record(name string, original, modified *protocol.Messag
 	h.sink.RecordInjection(inj)
 }
 
-func (h *GremlinHandler) aimed(msg *protocol.Message, mctx *proxy.MessageContext) bool {
-	return slices.Contains(h.targets, correlatedTool(msg, mctx))
+func (h *GremlinHandler) tally(target int, f func(*targetCount)) {
+	if target < 0 {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	f(&h.counts[target])
+}
+
+func (h *GremlinHandler) noteListing(msg *protocol.Message, mctx *proxy.MessageContext) {
+	if msg == nil || msg.Response == nil || mctx == nil || mctx.CorrelatedRequest == nil ||
+		mctx.CorrelatedRequest.GetMethod() != "tools/list" {
+		return
+	}
+	var page struct {
+		Tools *[]struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+		NextCursor string `json:"nextCursor"`
+	}
+	if json.Unmarshal(msg.Response.Result, &page) != nil || page.Tools == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.listed == nil {
+		h.listed = map[string]struct{}{}
+	}
+	for _, t := range *page.Tools {
+		if t.Name != "" {
+			h.listed[t.Name] = struct{}{}
+		}
+	}
+	if page.NextCursor == "" {
+		h.complete = true
+	}
+}
+
+func (h *GremlinHandler) Targets() []TargetStat {
+	if h == nil || h.targets == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]TargetStat, len(h.targets))
+	for i, name := range h.targets {
+		s := TargetStat{Name: name, Called: h.counts[i].called, Injected: h.counts[i].injected, Listing: ListingUnverified}
+		_, listed := h.listed[name]
+		switch {
+		case listed:
+			s.Listing = ListingListed
+		case h.complete:
+			s.Listing = ListingNotListed
+		}
+		if j := strings.LastIndex(name, "__"); !listed && j >= 0 {
+			if _, ok := h.listed[name[j+2:]]; ok {
+				s.ListedAs = name[j+2:]
+			}
+		}
+		out[i] = s
+	}
+	return out
 }
 
 func isToolCall(msg *protocol.Message, mctx *proxy.MessageContext) bool {

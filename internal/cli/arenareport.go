@@ -241,9 +241,21 @@ func renderMarkdown(w io.Writer, cur, base *CIResult) {
 		for _, f := range s.Failures {
 			_, _ = fmt.Fprintf(w, "- %s\n", f)
 		}
+		if len(s.Targets) > 0 {
+			lines := make([]string, len(s.Targets))
+			for j, t := range s.Targets {
+				lines[j] = targetLine(t)
+			}
+			_, _ = fmt.Fprintf(w, "- **Targets:** %s\n", strings.Join(lines, "; "))
+		}
 		if s.Coverage.Injected == 0 {
-			_, _ = fmt.Fprintf(w, "- **Nothing was measured:** the agent never called a tool, so no failure "+
-				"was injected. Check the scenario prompt and that the agent reads `{{mcp_config}}`.\n")
+			if len(s.Targets) > 0 {
+				_, _ = fmt.Fprintf(w, "- **Nothing was measured:** no call to a target tool was injected. "+
+					"Check that the scenario prompt leads the agent to the target tools.\n")
+			} else {
+				_, _ = fmt.Fprintf(w, "- **Nothing was measured:** the agent never called a tool, so no failure "+
+					"was injected. Check the scenario prompt and that the agent reads `{{mcp_config}}`.\n")
+			}
 			if s.AgentErr != "" {
 				_, _ = fmt.Fprintf(w, "- Agent exited with: `%s`\n", s.AgentErr)
 			}

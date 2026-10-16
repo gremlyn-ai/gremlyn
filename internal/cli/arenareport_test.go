@@ -121,3 +121,14 @@ func TestRenderMarkdown_NothingNewForAReportWithoutEffects(t *testing.T) {
 	assert.NotContains(t, out, "without annotations", "a report written before annotations existed renders as before")
 	assert.Equal(t, "All 1 scenarios passed", reportTitle(&cur, nil))
 }
+
+func TestRenderMarkdown_Targets(t *testing.T) {
+	s := scenario("timeout-on-create", []string{"timeout"}, 0, false, 0, `target "create_note" was never called, so no gremlin reached it`)
+	s.Targets = []chaos.TargetResult{{TargetStat: chaos.TargetStat{Name: "create_note", Listing: chaos.ListingListed}, State: chaos.TargetNeverCalled}}
+	var b strings.Builder
+	renderMarkdown(&b, &CIResult{Scenarios: []ScenarioResult{s}}, nil)
+	out := b.String()
+	assert.Contains(t, out, "- **Targets:** create_note never_called (called 0, injected 0, scored 0, listed)")
+	assert.Contains(t, out, "no call to a target tool was injected")
+	assert.NotContains(t, out, "the agent never called a tool")
+}
