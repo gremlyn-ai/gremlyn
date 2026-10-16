@@ -13,6 +13,6 @@
 
 **For users**: `target_tools: [create_note]` in a scenario. Names are the server's own, exact and case-sensitive. A target the agent never called fails the scenario. `examples/arena-notes.yaml` `timeout-on-create` now uses it, with a prompt that lists the notes first.
 
-**For developers**: targeting lives in `chaos.GremlinHandler` only; gremlins stay unaware of it and non-target calls draw no randomness. `internal/arena/chaos/testdata/untargeted-v0.2.0.golden.jsonl` pins the untargeted handler output; regenerate it only on purpose, with `-update`.
+**For developers**: targeting lives in `chaos.GremlinHandler` only; gremlins stay unaware of it and non-target calls draw no randomness. `internal/arena/chaos/testdata/untargeted.golden.jsonl` pins the untargeted handler output; regenerate it only on purpose, with `-update`.
 
 **Commits**: #24, #25, #26
