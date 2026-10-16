@@ -181,6 +181,69 @@ be `adapted` (20) is 0, a retried create that used to be 90 is 10. The delta aga
 baseline recorded before this change mixes the two rubrics. An unannotated server is not
 affected.
 
+## Target tools
+
+A scenario's `target_tools` aims its gremlins at named tools:
+
+```yaml
+- name: timeout-on-create
+  gremlins: [timeout]
+  intensity: certain
+  target_tools: [create_note]
+  prompt: "List my notes, then create a note titled 'groceries' ..."
+```
+
+A real agent reads before it writes. Without the key, `intensity: certain` hits the first
+`tools/call` of the run, so a timeout meant for `create_note` lands on `list_notes` and the
+duplicate-write rule is never exercised.
+
+**How a call is matched.** `chaos.GremlinHandler` filters before any gremlin is consulted, so
+the gremlins know nothing of targeting. A `tools/call` is a target when its `params.name` is in
+the list, and a response when the request it answers was one. The name is the agent's original
+request, read from the correlator, so a `hallucination` rename does not change it. The match is
+exact and case-sensitive. It is the server's name, as the wire carries it: Claude Code's
+`mcp__server__tool` never reaches the proxy.
+
+**Non-target calls draw no randomness.** They return before any `Inject`, where every gremlin
+draws, so adding or removing a read before the target leaves the target's injections unchanged
+under a seed. They pass through byte for byte, but not always on time: on stdio a delay on a
+target response also holds back what is queued behind it.
+
+**The observer is not target-aware.** A reaction is still the agent's next call, whatever tool
+it names: a read after a timeout on a write is `adapted`, the same write again is `retried`, a
+destructive call after an `injection` is `hijacked`.
+
+**What the report says per target** (`scenarios[].targets` in the `arena ci` JSON):
+
+| State | Meaning | The scenario |
+|---|---|---|
+| `never_called` | the agent never called it | fails, even when another target was measured |
+| `not_injected` | called, but no draw fired | fails when nothing at all was injected |
+| `unobserved` | injected, no reaction recorded | the coverage rule applies |
+| `scored` | injected and scored | scored |
+
+Each target also carries a listing state, built from the union of every `tools/list` page and
+re-list the run saw, unannotated tools included: `listed`; `not_listed` once a complete listing
+(a page without `nextCursor`) was seen without it, reported as *not offered by the server*, so
+a typo reads differently from an agent that chose not to call the tool; `unverified` with no
+complete listing. A `mcp__server__tool` entry gets a pointer to the listed server name.
+
+The handler writes the counts to `summary.json`; `arena ci` joins them with `events.jsonl`. The
+score itself does not change: `scoring.Score` takes the same events.
+
+**Validation.** An empty list, an empty or padded entry, a duplicate, a non-string entry and
+the `hallucination` gremlin's fake tool are rejected before the run starts. A null key is
+absent. On stdio the list reaches `wrap` as `--chaos-target-tool`, one per name.
+
+**Without the key** the handler takes no new path, and every new field is omitted. A golden
+transcript generated on v0.2.0 (`internal/arena/chaos/testdata`) pins that byte for byte, and
+both `docs/demo` reports re-score to their stored numbers. Adding the key to an existing
+scenario changes which call is injected, so that scenario's first delta against `main` compares
+two different measurements.
+
+**Known limit.** When the agent sends parallel tool calls, a sibling call sent right after a
+`hallucination` request reads as `adapted` before the agent saw any error.
+
 ## Invariants
 
 Breaking one of these silently produces numbers nobody can trust.
