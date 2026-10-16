@@ -63,6 +63,7 @@ func (g *LoopGremlin) Inject(_ context.Context, msg *protocol.Message) (*protoco
 		"message": g.Message,
 	})
 	modResp.Result = retryResult
+	modResp.Error = nil
 	modified.Response = &modResp
 
 	return &modified, true, nil
