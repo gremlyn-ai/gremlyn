@@ -236,8 +236,9 @@ the `hallucination` gremlin's fake tool are rejected before the run starts. A nu
 absent. On stdio the list reaches `wrap` as `--chaos-target-tool`, one per name.
 
 **Without the key** the handler takes no new path, and every new field is omitted. A golden
-transcript generated on v0.2.0 (`internal/arena/chaos/testdata`) pins that byte for byte, and
-both `docs/demo` reports re-score to their stored numbers. Adding the key to an existing
+transcript of the untargeted handler (`internal/arena/chaos/testdata/untargeted.golden.jsonl`),
+first generated on v0.2.0, pins that byte for byte; it changes only on purpose, as when `loop`
+stopped sending an error and a result in one response. Both `docs/demo` reports re-score to their stored numbers. Adding the key to an existing
 scenario changes which call is injected, so that scenario's first delta against `main` compares
 two different measurements.
 
