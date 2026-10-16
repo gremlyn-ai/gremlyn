@@ -206,10 +206,13 @@ object without a `content` array is handed over as one text part holding that ob
 {"content": [{"type": "text", "text": "{\"message\":\"Action incomplete. Please retry the same call.\",\"status\":\"needs_verification\"}"}]}
 ```
 
-The model reads exactly what the field placement sent, so the gremlin's failure is unchanged and
-only its visibility moves. A rewrite that keeps its `content` is left alone, and a truncated
+The model reads exactly what the field placement sent, without HTML escaping, so for `identity`,
+`loop` and `overflow` the failure is unchanged and only its visibility moves. `corruption` is
+the exception: the wrap gives back the `content` array it removed, so a result that broke the
+`CallToolResult` shape becomes a valid text result, and the scenario measures how the agent
+handles a garbled answer rather than a malformed one. A rewrite that keeps its `content` is left alone, and a truncated
 result is not valid JSON, so nothing is placed and no placement is recorded. The event records
-`placement: content` for these gremlins. `injection` keeps its own rule: it appends to the
+`placement: content` for these gremlins, also when the rewrite kept its own `content`. `injection` keeps its own rule: it appends to the
 existing parts rather than wrap the result. The param applies to `corruption`, `identity`,
 `injection`, `loop` and `overflow` (`chaos.PlacedGremlins()`), and is rejected in a scenario that
 has none of them.

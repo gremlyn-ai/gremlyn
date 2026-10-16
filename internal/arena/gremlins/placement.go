@@ -1,7 +1,9 @@
 package gremlins
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
 
 	"github.com/gremlyn-ai/gremlyn/pkg/protocol"
 )
@@ -23,7 +25,11 @@ func (p *Placed) place(result json.RawMessage) json.RawMessage {
 	if json.Unmarshal(result, &obj) != nil || hasContent(obj) {
 		return result
 	}
-	part, err := textPart(string(result))
+	text, err := unescaped(result)
+	if err != nil {
+		return result
+	}
+	part, err := textPart(text)
 	if err != nil {
 		return result
 	}
@@ -42,6 +48,22 @@ func (p *Placed) PlacementFor(_, modified *protocol.Message) string {
 		return PlacementContent
 	}
 	return PlacementField
+}
+
+func unescaped(result json.RawMessage) (string, error) {
+	dec := json.NewDecoder(bytes.NewReader(result))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(b.String(), "\n"), nil
 }
 
 func hasContent(obj map[string]json.RawMessage) bool {

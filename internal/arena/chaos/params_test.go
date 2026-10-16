@@ -3,6 +3,7 @@ package chaos
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -258,5 +259,14 @@ func TestBuildGremlinsWithParams_ContentPlacementReachesEveryResultRewriter(t *t
 			require.NoError(t, json.Unmarshal(got[0].Details, &d))
 			assert.Equal(t, "content", d.Placement)
 		})
+	}
+}
+
+func TestPlacedGremlins_AreExactlyThoseThatPlace(t *testing.T) {
+	for _, name := range KnownGremlins() {
+		gs, err := BuildGremlins([]string{name}, 1, IntensityCertain)
+		require.NoError(t, err)
+		_, ok := gs[0].(placer)
+		assert.Equal(t, slices.Contains(PlacedGremlins(), name), ok, name)
 	}
 }
