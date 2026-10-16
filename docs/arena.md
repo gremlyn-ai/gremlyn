@@ -238,9 +238,9 @@ absent. On stdio the list reaches `wrap` as `--chaos-target-tool`, one per name.
 **Without the key** the handler takes no new path, and every new field is omitted. A golden
 transcript of the untargeted handler (`internal/arena/chaos/testdata/untargeted.golden.jsonl`),
 first generated on v0.2.0, pins that byte for byte; it changes only on purpose, as when `loop`
-stopped sending an error and a result in one response. Both `docs/demo` reports re-score to their stored numbers. Adding the key to an existing
-scenario changes which call is injected, so that scenario's first delta against `main` compares
-two different measurements.
+stopped sending an error and a result in one response. Both `docs/demo` reports re-score to
+their stored numbers. Adding the key to an existing scenario changes which call is injected, so
+that scenario's first delta against `main` compares two different measurements.
 
 **Known limit.** When the agent sends parallel tool calls, a sibling call sent right after a
 `hallucination` request reads as `adapted` before the agent saw any error.
