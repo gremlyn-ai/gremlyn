@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 
 type GremlinHandler struct {
 	gremlins []gremlins.Gremlin
+	targets  []string
 	sink     InjectionSink
 	logger   zerolog.Logger
 	now      func() time.Time
@@ -32,6 +34,10 @@ func WithClock(now func() time.Time) HandlerOption {
 
 func WithIDGenerator(newID func() string) HandlerOption {
 	return func(h *GremlinHandler) { h.newID = newID }
+}
+
+func WithTargets(names []string) HandlerOption {
+	return func(h *GremlinHandler) { h.targets = slices.Clone(names) }
 }
 
 func NewGremlinHandler(ordered []gremlins.Gremlin, sink InjectionSink, logger zerolog.Logger, opts ...HandlerOption) *GremlinHandler {
@@ -56,6 +62,10 @@ func (h *GremlinHandler) HandleMessage(ctx context.Context, msg *protocol.Messag
 	}
 
 	if !isToolCall(msg, mctx) {
+		return &proxy.Decision{Action: proxy.DecisionSkip}, nil
+	}
+
+	if h.targets != nil && !h.aimed(msg, mctx) {
 		return &proxy.Decision{Action: proxy.DecisionSkip}, nil
 	}
 
@@ -107,6 +117,10 @@ func (h *GremlinHandler) record(name string, original, modified *protocol.Messag
 		Modified:    modified,
 	}
 	h.sink.RecordInjection(inj)
+}
+
+func (h *GremlinHandler) aimed(msg *protocol.Message, mctx *proxy.MessageContext) bool {
+	return slices.Contains(h.targets, correlatedTool(msg, mctx))
 }
 
 func isToolCall(msg *protocol.Message, mctx *proxy.MessageContext) bool {
