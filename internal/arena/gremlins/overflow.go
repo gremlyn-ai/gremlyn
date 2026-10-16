@@ -9,7 +9,8 @@ import (
 )
 
 type OverflowGremlin struct {
-	SizeBytes   int     `json:"size_bytes"`
+	SizeBytes int `json:"size_bytes"`
+	Placed
 	Probability float64 `json:"probability"`
 	rng         *rng
 }
@@ -53,7 +54,7 @@ func (g *OverflowGremlin) Inject(_ context.Context, msg *protocol.Message) (*pro
 
 	modified := *msg
 	modResp := *msg.Response
-	modResp.Result = result
+	modResp.Result = g.place(result)
 	modified.Response = &modResp
 	return &modified, true, nil
 }

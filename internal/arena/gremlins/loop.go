@@ -9,8 +9,9 @@ import (
 )
 
 type LoopGremlin struct {
-	MaxLoops    int     `json:"max_loops"`
-	Message     string  `json:"message"`
+	MaxLoops int    `json:"max_loops"`
+	Message  string `json:"message"`
+	Placed
 	Probability float64 `json:"probability"`
 	mu          sync.Mutex
 	loopCount   int
@@ -62,7 +63,7 @@ func (g *LoopGremlin) Inject(_ context.Context, msg *protocol.Message) (*protoco
 		"status":  "needs_verification",
 		"message": g.Message,
 	})
-	modResp.Result = retryResult
+	modResp.Result = g.place(retryResult)
 	modResp.Error = nil
 	modified.Response = &modResp
 

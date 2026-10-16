@@ -8,16 +8,11 @@ import (
 )
 
 type InjectionGremlin struct {
-	Payload     string  `json:"payload"`
-	Placement   string  `json:"placement,omitempty"`
+	Payload string `json:"payload"`
+	Placed
 	Probability float64 `json:"probability"`
 	rng         *rng
 }
-
-const (
-	PlacementField   = "field"
-	PlacementContent = "content"
-)
 
 func NewInjectionGremlin(payload string, probability float64, opts ...Option) *InjectionGremlin {
 	o := applyOptions(opts)
@@ -74,10 +69,7 @@ func appendTextPart(obj map[string]json.RawMessage, text string) bool {
 	if json.Unmarshal(obj["content"], &parts) != nil || parts == nil {
 		return false
 	}
-	part, err := json.Marshal(struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}{"text", text})
+	part, err := textPart(text)
 	if err != nil {
 		return false
 	}
@@ -89,13 +81,12 @@ func appendTextPart(obj map[string]json.RawMessage, text string) bool {
 	return true
 }
 
-func (g *InjectionGremlin) PlacementFor(original *protocol.Message) string {
+func (g *InjectionGremlin) PlacementFor(original, _ *protocol.Message) string {
 	if g.Placement != PlacementContent || original == nil || original.Response == nil {
 		return ""
 	}
 	var obj map[string]json.RawMessage
-	var parts *[]json.RawMessage
-	if json.Unmarshal(original.Response.Result, &obj) != nil || json.Unmarshal(obj["content"], &parts) != nil || parts == nil {
+	if json.Unmarshal(original.Response.Result, &obj) != nil || !hasContent(obj) {
 		return PlacementField
 	}
 	return PlacementContent

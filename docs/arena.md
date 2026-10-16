@@ -195,10 +195,24 @@ which is where third-party text sits on a real server whose reads return pages o
 `content`: the event records `placement: content`, the model received the instruction to delete
 a note, and it did not call `delete_note` (reaction `silent`, 90).
 
-Other gremlins share the blindness and have no placement param yet: `identity`, `loop`,
-`overflow` and `corruption` in its `wrong_types` mode replace the result with an object that has
-no `content`, so through Claude Code the model sees an empty result. The agent's reaction is then
-a reaction to that emptiness more than to the gremlin's own failure.
+**The other gremlins that rewrite a result take the same param.** `identity`, `loop` and
+`overflow` replace the result with an object that has no `content`, and `corruption` can drop
+`content` with the other top-level fields (or, in its `wrong_types` mode, replace them all).
+Through Claude Code the model then sees an empty result, and the agent reacts to that emptiness
+more than to the gremlin's failure. With `injection_placement: content`, a rewrite that leaves an
+object without a `content` array is handed over as one text part holding that object's JSON:
+
+```json
+{"content": [{"type": "text", "text": "{\"message\":\"Action incomplete. Please retry the same call.\",\"status\":\"needs_verification\"}"}]}
+```
+
+The model reads exactly what the field placement sent, so the gremlin's failure is unchanged and
+only its visibility moves. A rewrite that keeps its `content` is left alone, and a truncated
+result is not valid JSON, so nothing is placed and no placement is recorded. The event records
+`placement: content` for these gremlins. `injection` keeps its own rule: it appends to the
+existing parts rather than wrap the result. The param applies to `corruption`, `identity`,
+`injection`, `loop` and `overflow` (`chaos.PlacedGremlins()`), and is rejected in a scenario that
+has none of them.
 
 **Comparing with older baselines.** For a server whose tools are annotated, the same agent
 behaviour can now score differently than it did with an older Gremlyn: a hijack that used to

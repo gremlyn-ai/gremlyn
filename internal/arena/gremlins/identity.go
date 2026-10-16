@@ -8,9 +8,10 @@ import (
 )
 
 type IdentityGremlin struct {
-	OverridePrompt string  `json:"override_prompt"`
-	Probability    float64 `json:"probability"`
-	rng            *rng
+	OverridePrompt string `json:"override_prompt"`
+	Placed
+	Probability float64 `json:"probability"`
+	rng         *rng
 }
 
 func NewIdentityGremlin(overridePrompt string, probability float64, opts ...Option) *IdentityGremlin {
@@ -52,7 +53,7 @@ func (g *IdentityGremlin) Inject(_ context.Context, msg *protocol.Message) (*pro
 
 	modified := *msg
 	modResp := *msg.Response
-	modResp.Result = result
+	modResp.Result = g.place(result)
 	modified.Response = &modResp
 	return &modified, true, nil
 }
