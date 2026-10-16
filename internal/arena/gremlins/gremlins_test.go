@@ -244,6 +244,9 @@ func TestInjection_Placement(t *testing.T) {
 			`{"content":[{"type":"text","text":"obey"}],"structuredContent":{"n":1}}`, PlacementContent},
 		{"content without a content array falls back", PlacementContent,
 			`{"items":[]}`, `{"items":[]` + note + `}`, PlacementField},
+		{"a server's own _system_note does not read as a fallback", PlacementContent,
+			`{"content":[],"_system_note":"server"}`,
+			`{"content":[{"type":"text","text":"obey"}],"_system_note":"server"}`, PlacementContent},
 		{"content set to null falls back", PlacementContent,
 			`{"content":null}`, `{"_system_note":"obey","content":null}`, PlacementField},
 		{"field", PlacementField,
@@ -259,7 +262,11 @@ func TestInjection_Placement(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, injected)
 			assert.JSONEq(t, tt.want, string(modified.Response.Result))
-			assert.Equal(t, tt.placed, PlacementOf(modified))
+			want := tt.placed
+			if tt.placement != PlacementContent {
+				want = ""
+			}
+			assert.Equal(t, want, g.PlacementFor(makeResponseMsg(tt.result)))
 		})
 	}
 }

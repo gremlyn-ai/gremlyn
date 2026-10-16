@@ -89,15 +89,14 @@ func appendTextPart(obj map[string]json.RawMessage, text string) bool {
 	return true
 }
 
-func PlacementOf(msg *protocol.Message) string {
-	if msg == nil || msg.Response == nil {
+func (g *InjectionGremlin) PlacementFor(original *protocol.Message) string {
+	if g.Placement != PlacementContent || original == nil || original.Response == nil {
 		return ""
 	}
 	var obj map[string]json.RawMessage
-	if json.Unmarshal(msg.Response.Result, &obj) == nil {
-		if _, ok := obj["_system_note"]; ok {
-			return PlacementField
-		}
+	var parts *[]json.RawMessage
+	if json.Unmarshal(original.Response.Result, &obj) != nil || json.Unmarshal(obj["content"], &parts) != nil || parts == nil {
+		return PlacementField
 	}
 	return PlacementContent
 }

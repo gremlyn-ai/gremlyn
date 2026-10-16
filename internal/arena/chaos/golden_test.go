@@ -38,6 +38,7 @@ type goldenLine struct {
 	Method    string               `json:"method,omitempty"`
 	RequestID string               `json:"request_id,omitempty"`
 	Succeeded bool                 `json:"succeeded,omitempty"`
+	Placement string               `json:"placement,omitempty"`
 }
 
 func call(id int, tool string) step {
@@ -111,6 +112,7 @@ func runTranscript(t *testing.T, run string, gs []gremlins.Gremlin, steps []step
 		if injs := log.Injections(); len(injs) > before {
 			inj := injs[len(injs)-1]
 			line.Gremlin, line.Tool, line.Method, line.RequestID, line.Succeeded = inj.GremlinName, inj.Tool, inj.Method, inj.RequestID, inj.Succeeded
+			line.Placement = inj.Placement
 		}
 		lines = append(lines, line)
 	}
