@@ -21,6 +21,7 @@ type GremlinHandler struct {
 	gremlins []gremlins.Gremlin
 	targets  []string
 	counts   []targetCount
+	watched  map[string]struct{}
 	listed   map[string]struct{}
 	complete bool
 	mu       sync.Mutex
@@ -48,6 +49,13 @@ func WithTargets(names []string) HandlerOption {
 	return func(h *GremlinHandler) {
 		h.targets = slices.Clone(names)
 		h.counts = make([]targetCount, len(names))
+		h.watched = make(map[string]struct{}, 2*len(names))
+		for _, name := range names {
+			h.watched[name] = struct{}{}
+			if j := strings.LastIndex(name, "__"); j >= 0 {
+				h.watched[name[j+2:]] = struct{}{}
+			}
+		}
 	}
 }
 
@@ -154,7 +162,7 @@ func (h *GremlinHandler) tally(target int, f func(*targetCount)) {
 
 func (h *GremlinHandler) noteListing(msg *protocol.Message, mctx *proxy.MessageContext) {
 	if msg == nil || msg.Response == nil || mctx == nil || mctx.CorrelatedRequest == nil ||
-		mctx.CorrelatedRequest.GetMethod() != "tools/list" {
+		mctx.CorrelatedRequest.GetMethod() != string(protocol.MCPMethodToolsList) {
 		return
 	}
 	var page struct {
@@ -172,7 +180,7 @@ func (h *GremlinHandler) noteListing(msg *protocol.Message, mctx *proxy.MessageC
 		h.listed = map[string]struct{}{}
 	}
 	for _, t := range *page.Tools {
-		if t.Name != "" {
+		if _, ok := h.watched[t.Name]; ok {
 			h.listed[t.Name] = struct{}{}
 		}
 	}
