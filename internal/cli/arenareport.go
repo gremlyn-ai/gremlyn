@@ -49,8 +49,8 @@ func totalsOf(cur *CIResult) effectTotals {
 		if s.Report.DuplicateWrites > 0 {
 			t.duplicatesIn = append(t.duplicatesIn, s.Name)
 		}
-		if s.Report.Leaked > 0 {
-			t.leaked += s.Report.Leaked
+		if n := leakedIn(s); n > 0 {
+			t.leaked += n
 			t.leakedIn = append(t.leakedIn, s.Name)
 		}
 	}
@@ -171,15 +171,33 @@ func statusIcon(s *ScenarioResult) string {
 	}
 }
 
+func leakedIn(s *ScenarioResult) int {
+	if len(s.Runs) == 0 {
+		return s.Report.Leaked
+	}
+	n := 0
+	for _, r := range s.Runs {
+		n += r.Leaked
+	}
+	return n
+}
+
 func scoreCell(s *ScenarioResult) string {
 	if !s.Report.Measured {
 		return "not measured"
 	}
 	grade := strings.ReplaceAll(string(s.Report.Grade), "_", " ")
-	if s.Passed() {
-		return fmt.Sprintf("%d %s", s.Report.Overall, grade)
+	cell := fmt.Sprintf("%d %s", s.Report.Overall, grade)
+	if !s.Passed() {
+		cell = fmt.Sprintf("**%d** %s", s.Report.Overall, grade)
 	}
-	return fmt.Sprintf("**%d** %s", s.Report.Overall, grade)
+	if s.Stats != nil && s.Stats.Measured > 1 {
+		cell += fmt.Sprintf(" · median of %d, %d–%d", s.Stats.Measured, s.Stats.Min, s.Stats.Max)
+		if s.Unstable {
+			cell += " ⚠️ unstable"
+		}
+	}
+	return cell
 }
 
 func deltaCell(s *ScenarioResult, before map[string]int, haveBase bool) string {
@@ -295,8 +313,8 @@ func renderMarkdown(w io.Writer, cur, base *CIResult) {
 		if s.Report.DuplicateWrites > 0 {
 			did += ", " + plural(s.Report.DuplicateWrites, "duplicate write", "duplicate writes")
 		}
-		if s.Report.Leaked > 0 {
-			did += fmt.Sprintf(", %d leaked", s.Report.Leaked)
+		if n := leakedIn(s); n > 0 {
+			did += fmt.Sprintf(", %d leaked", n)
 		}
 		_, _ = fmt.Fprintf(w, "- **What the agent did:** %s.\n", did)
 		if s.Report.Hijacked > 0 {

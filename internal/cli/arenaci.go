@@ -74,6 +74,7 @@ type ScenarioConfig struct {
 	TargetTools targetTools    `yaml:"target_tools"`
 	Meta        map[string]any `yaml:"meta"`
 	Expect      ExpectConfig   `yaml:"expect"`
+	Repeat      int            `yaml:"repeat"`
 }
 
 type ExpectConfig struct {
@@ -86,8 +87,9 @@ type AnswerResult struct {
 }
 
 type ThresholdConfig struct {
-	MinOverall   int                       `yaml:"min_overall"`
-	MinDimension map[scoring.Dimension]int `yaml:"min_dimension"`
+	MinOverall      int                       `yaml:"min_overall"`
+	MinDimension    map[scoring.Dimension]int `yaml:"min_dimension"`
+	StabilitySpread int                       `yaml:"stability_spread"`
 }
 
 type ScenarioResult struct {
@@ -105,6 +107,12 @@ type ScenarioResult struct {
 	InjectionFallbacks int      `json:"injection_fallbacks,omitempty"`
 	AgentErr           string   `json:"agent_error,omitempty"`
 	Failures           []string `json:"failures,omitempty"`
+
+	Runs     []RunResult `json:"runs,omitempty"`
+	Stats    *RunStats   `json:"stats,omitempty"`
+	Unstable bool        `json:"unstable,omitempty"`
+
+	answerFailures []string
 }
 
 func (r ScenarioResult) Passed() bool { return len(r.Failures) == 0 }
@@ -121,6 +129,8 @@ func NewArenaCICmd(logger zerolog.Logger) *cobra.Command {
 		format        string
 		keepArtifacts bool
 		only          []string
+		repeat        int
+		strictStable  bool
 	)
 
 	cmd := &cobra.Command{
@@ -152,11 +162,21 @@ call means no gremlin was crossed and nothing was measured.`,
 			}
 			result := CIResult{Passed: true}
 			out := cmd.OutOrStdout()
+			costOut := out
+			if format == "json" {
+				costOut = cmd.ErrOrStderr()
+			}
+			_, _ = fmt.Fprintln(costOut, paletteFor(costOut).dim(costLine(cfg.Scenarios, repeat)))
 			for _, sc := range cfg.Scenarios {
+				n := repeatsFor(sc, repeat)
 				if format != "json" {
-					_, _ = fmt.Fprintf(out, "\n%s\n", paletteFor(out).dim(fmt.Sprintf("running %s (%s)...", sc.Name, strings.Join(sc.Gremlins, ", "))))
+					label := fmt.Sprintf("running %s (%s)", sc.Name, strings.Join(sc.Gremlins, ", "))
+					if n > 1 {
+						label += fmt.Sprintf(" × %d", n)
+					}
+					_, _ = fmt.Fprintf(out, "\n%s\n", paletteFor(out).dim(label+"..."))
 				}
-				res := runScenario(cmd.Context(), logger, self, cfg, sc, keepArtifacts)
+				res := runRepeated(cmd.Context(), logger, self, cfg, sc, keepArtifacts, n, strictStable)
 				if format != "json" {
 					writeScenarioText(out, &res)
 				}
@@ -184,6 +204,10 @@ call means no gremlin was crossed and nothing was measured.`,
 	cmd.Flags().StringVar(&format, "format", "text", "Console output format: text or json")
 	cmd.Flags().StringSliceVar(&only, "scenario", nil,
 		"Run only these scenarios, by name (repeatable). Default: all of them")
+	cmd.Flags().IntVar(&repeat, "repeat", 0,
+		"Run every scenario this many times with the same seed; thresholds apply to the median run. Default: each scenario's repeat, else 1")
+	cmd.Flags().BoolVar(&strictStable, "strict-stability", false,
+		"Fail a scenario whose score spread exceeds thresholds.stability_spread, instead of warning")
 	cmd.Flags().BoolVar(&keepArtifacts, "keep-artifacts", false,
 		"Keep the per-scenario temp directory (mcp config, event log) for debugging")
 
@@ -285,6 +309,9 @@ func validateCIConfig(cfg *CIConfig) error {
 		if len(sc.Gremlins) == 0 {
 			return fmt.Errorf("scenario %q: at least one gremlin is required", sc.Name)
 		}
+		if sc.Repeat < 0 {
+			return fmt.Errorf("scenario %q: repeat must be positive, got %d", sc.Name, sc.Repeat)
+		}
 		if sc.Window < 0 {
 			return fmt.Errorf("scenario %q: window must be positive, got %s", sc.Name, sc.Window)
 		}
@@ -310,6 +337,9 @@ func validateCIConfig(cfg *CIConfig) error {
 				return fmt.Errorf("scenario %q: target_tools: %w", sc.Name, err)
 			}
 		}
+	}
+	if cfg.Thresholds.StabilitySpread < 0 {
+		return fmt.Errorf("thresholds.stability_spread must be positive, got %d", cfg.Thresholds.StabilitySpread)
 	}
 	if cfg.Agent.Timeout <= 0 {
 		cfg.Agent.Timeout = 5 * time.Minute
@@ -359,6 +389,17 @@ func containsPlaceholder(argv []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func runRepeated(ctx context.Context, logger zerolog.Logger, self string, cfg *CIConfig, sc ScenarioConfig, keep bool, n int, strict bool) ScenarioResult {
+	if n <= 1 {
+		return runScenario(ctx, logger, self, cfg, sc, keep)
+	}
+	runs := make([]ScenarioResult, n)
+	for i := range runs {
+		runs[i] = runScenario(ctx, logger, self, cfg, sc, keep)
+	}
+	return aggregateRuns(runs, cfg.Thresholds, strict)
 }
 
 func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *CIConfig, sc ScenarioConfig, keep bool) ScenarioResult {
@@ -470,6 +511,7 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	res.Failures = append(res.Failures, upstreamFailures(res.Upstream)...)
 	res.Failures = append(res.Failures, checkThresholds(cfg.Thresholds, res)...)
 	res.Failures = append(res.Failures, answerFailures...)
+	res.answerFailures = answerFailures
 	return res
 }
 
@@ -798,6 +840,17 @@ func writeScenarioText(w io.Writer, sc *ScenarioResult) {
 	_, _ = fmt.Fprintf(w, "  coverage:   %s\n", sc.Coverage)
 	for _, t := range sc.Targets {
 		_, _ = fmt.Fprintf(w, "  target:     %s\n", targetLine(t))
+	}
+	if sc.Stats != nil {
+		scores := make([]string, len(sc.Runs))
+		for i, r := range sc.Runs {
+			scores[i] = fmt.Sprint(r.Overall)
+		}
+		line := fmt.Sprintf("%s → median %d, spread %d", strings.Join(scores, " "), sc.Stats.Median, sc.Stats.Spread)
+		if sc.Unstable {
+			line += " " + p.bad("(unstable)")
+		}
+		_, _ = fmt.Fprintf(w, "  runs:       %s\n", line)
 	}
 	if sc.Answer != nil {
 		passed := 0
