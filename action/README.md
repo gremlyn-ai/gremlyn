@@ -83,6 +83,7 @@ unattended when a maintainer labels a PR `gremlyn-fix`, and opens a second PR wi
 | `comment-on-pr` | `true` | Post and update the PR comment; needs `pull-requests: write` |
 | `baseline` | — | A previous report to compare with. Empty: the last successful run of this workflow on the base branch; needs `actions: read` |
 | `fail-on-threshold` | `false` | Fail the job, and make the check red, when a threshold is missed |
+| `artifacts-dir` | — | Keep each scenario's `agent.log`, `answer.txt` and `events.jsonl` under this path and upload them as `gremlyn-artifacts`. Off by default: they hold what your agent printed and answered |
 | `github-token` | `github.token` | Token for the baseline, the check and the comment |
 
 A missing permission never fails the job. The action logs a notice and skips that output.

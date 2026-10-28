@@ -52,6 +52,14 @@ inputs:
       reported as "neutral" instead. Turn this on once the scores are stable.
     required: false
     default: "false"
+  artifacts-dir:
+    description: >
+      Keep each scenario's directory (agent.log, answer.txt, events.jsonl) under this path
+      and upload it as the `gremlyn-artifacts` artifact. Off by default: agent.log holds
+      whatever your agent printed, and answer.txt its answer, so turn it on only when that
+      may be read by anyone who can read the workflow's artifacts.
+    required: false
+    default: ""
   github-token:
     description: "Token used to fetch the baseline, publish the check and comment on the PR"
     required: false
@@ -146,6 +154,7 @@ runs:
         REPORT: ${{ inputs.report }}
         MIN_SCORE: ${{ inputs.min-score }}
         BASELINE: ${{ inputs.baseline }}
+        ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
         set -uo pipefail
@@ -171,9 +180,12 @@ runs:
         PY
         fi
 
+        ci_args=(--config "$CONFIG" --format text --out "$REPORT")
+        [ -n "$ARTIFACTS_DIR" ] && ci_args+=(--artifacts-dir "$ARTIFACTS_DIR")
+
         set +e
         env -u GH_TOKEN -u GITHUB_TOKEN \
-          gremlyn arena ci --config "$CONFIG" --format text --out "$REPORT"
+          gremlyn arena ci "${ci_args[@]}"
         status=$?
         set -e
 
@@ -219,6 +231,14 @@ runs:
         name: gremlyn-report
         path: ${{ inputs.report }}
         if-no-files-found: warn
+
+    - name: Upload artifacts
+      if: ${{ always() && inputs.artifacts-dir != '' }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      with:
+        name: gremlyn-artifacts
+        path: ${{ inputs.artifacts-dir }}
+        if-no-files-found: ignore
 
     - name: Publish the Gremlyn check
       if: ${{ always() && inputs.check-run == 'true' && steps.run.outputs.summary != '' }}
