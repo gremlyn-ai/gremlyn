@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -146,6 +147,8 @@ func TestAnswerFromStdout(t *testing.T) {
 		{"claude -p --output-format json", `{"type":"result","subtype":"success","result":"the graph is empty","session_id":"x"}`, "the graph is empty"},
 		{"claude -p --output-format stream-json", "{\"type\":\"system\"}\n{\"type\":\"assistant\"}\n{\"type\":\"result\",\"result\":\"done\"}\n", "done"},
 		{"other json is kept as is", `{"answer":"x"}`, `{"answer":"x"}`},
+		{"stream-json cut before its result is no answer", "{\"type\":\"system\"}\n{\"type\":\"user\",\"message\":\"tool_result GRM-1\"}\n", ""},
+		{"json envelope without a result is no answer", `{"type":"result","subtype":"error_max_turns"}`, ""},
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.want, answerFromStdout(tt.stdout), tt.name)
@@ -208,4 +211,43 @@ func TestArenaCI_InjectionRubricReadsIntent(t *testing.T) {
 	assert.Equal(t, 1, forwards.Report.Hijacked, "the next call carried text only the payload supplied")
 	assert.Equal(t, 0, forwards.Report.Dimensions["injection_defense"].Score)
 	assert.False(t, forwards.Passed())
+}
+
+func TestReadAnswer_OnlyARegularFileBounded(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "secret")
+	require.NoError(t, os.WriteFile(secret, []byte("token=abc"), 0o600))
+	link := filepath.Join(dir, "answer.txt")
+	require.NoError(t, os.Symlink(secret, link))
+	text, source := readAnswer(zerolog.Nop(), link, "from stdout")
+	assert.Equal(t, answerSourceStdout, source, "a symlink planted as the answer file is not followed")
+	assert.Equal(t, "from stdout", text)
+
+	big := filepath.Join(dir, "big.txt")
+	require.NoError(t, os.WriteFile(big, bytes.Repeat([]byte("a"), maxAnswerBytes+10), 0o600))
+	text, source = readAnswer(zerolog.Nop(), big, "")
+	assert.Equal(t, answerSourceFile, source)
+	assert.Len(t, text, maxAnswerBytes)
+}
+
+func TestCappedBuffer(t *testing.T) {
+	b := &cappedBuffer{max: 5}
+	n, err := b.Write([]byte("hello world"))
+	require.NoError(t, err)
+	assert.Equal(t, 11, n, "the agent's pipe is always drained")
+	_, err = b.Write([]byte("more"))
+	require.NoError(t, err)
+	assert.Equal(t, "hello\n[gremlyn: output truncated, 10 bytes dropped]\n", b.String())
+}
+
+func TestWriteArtifacts_DoesNotFollowAPlantedLink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "elsewhere")
+	require.NoError(t, os.WriteFile(target, []byte("untouched"), 0o600))
+	require.NoError(t, os.Symlink(target, filepath.Join(dir, "agent.log")))
+	writeArtifacts(zerolog.Nop(), dir, "log", "answer", answerSourceStdout)
+	data, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "untouched", string(data))
+	assertPrivateFile(t, filepath.Join(dir, "agent.log"), "log")
 }

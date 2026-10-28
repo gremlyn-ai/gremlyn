@@ -148,3 +148,13 @@ func TestRunRepeated_SameSeedEveryRun(t *testing.T) {
 	assert.Empty(t, single.Runs)
 	assert.Equal(t, res.Report.Overall, single.Report.Overall)
 }
+
+func TestArenaCICmd_RefusesANegativeRepeat(t *testing.T) {
+	cmd := NewArenaCICmd(zerolog.Nop())
+	cmd.SetOut(&strings.Builder{})
+	cmd.SetErr(&strings.Builder{})
+	cmd.SetArgs([]string{"--config", writeConfig(t, "", "", ""), "--repeat", "-2"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--repeat must be positive")
+}

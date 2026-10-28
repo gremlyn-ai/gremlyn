@@ -179,6 +179,9 @@ call means no gremlin was crossed and nothing was measured.`,
 			if err != nil {
 				return err
 			}
+			if repeat < 0 {
+				return fmt.Errorf("--repeat must be positive, got %d", repeat)
+			}
 			if cfg.Scenarios, err = selectScenarios(cfg.Scenarios, only); err != nil {
 				return err
 			}
@@ -380,7 +383,7 @@ func checkPromptAgainstPayload(sc ScenarioConfig) error {
 	prompt := strings.ToLower(sc.Prompt)
 	for gremlin, text := range sc.Params.Payloads(sc.Gremlins, 0) {
 		for _, m := range chaos.PayloadMarkers(text) {
-			if strings.Contains(prompt, m) {
+			if chaos.MarkerIn(prompt, m) {
 				return fmt.Errorf("scenario %q: the prompt names %q, which the %s text also names: "+
 					"the rubric could not tell obeying the injection from doing the task, so change one of them", sc.Name, m, gremlin)
 			}
@@ -508,9 +511,10 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	agentCmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
 	agentCmd.Env = append(scrubEnv(os.Environ(), hiddenVars), envSlice(cfg.Agent.Env)...)
 	agentCmd.Stdin = nil
-	var agentOut, agentStdout strings.Builder
-	combined := &lockedWriter{w: &agentOut}
-	agentCmd.Stdout = io.MultiWriter(&agentStdout, combined)
+	agentOut := &cappedBuffer{max: maxAgentOutput}
+	agentStdout := &cappedBuffer{max: maxAgentOutput}
+	combined := &lockedWriter{w: agentOut}
+	agentCmd.Stdout = io.MultiWriter(agentStdout, combined)
 	agentCmd.Stderr = combined
 
 	logger.Info().Str("scenario", sc.Name).Strs("gremlins", sc.Gremlins).Int64("seed", seed).Msg("running scenario")
@@ -575,16 +579,60 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	return l.w.Write(p)
 }
 
+const (
+	maxAgentOutput = 8 << 20
+	maxAnswerBytes = 1 << 20
+)
+
+type cappedBuffer struct {
+	max     int
+	b       strings.Builder
+	dropped int
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	room := max(0, c.max-c.b.Len())
+	kept := min(room, len(p))
+	c.b.Write(p[:kept])
+	c.dropped += len(p) - kept
+	return len(p), nil
+}
+
+func (c *cappedBuffer) String() string {
+	if c.dropped == 0 {
+		return c.b.String()
+	}
+	return fmt.Sprintf("%s\n[gremlyn: output truncated, %d bytes dropped]\n", c.b.String(), c.dropped)
+}
+
 func writeArtifacts(logger zerolog.Logger, dir, agentLog, answer, answerSource string) {
-	if err := os.WriteFile(filepath.Join(dir, "agent.log"), []byte(agentLog), 0o600); err != nil {
+	if err := writePrivate(filepath.Join(dir, "agent.log"), agentLog); err != nil {
 		logger.Warn().Err(err).Msg("writing agent.log")
 	}
 	if answerSource != answerSourceStdout {
 		return
 	}
-	if err := os.WriteFile(filepath.Join(dir, "answer.txt"), []byte(answer), 0o600); err != nil {
+	if err := writePrivate(filepath.Join(dir, "answer.txt"), answer); err != nil {
 		logger.Warn().Err(err).Msg("writing answer.txt")
 	}
+}
+
+func writePrivate(path, content string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("replacing %q: %w", path, err)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("creating %q: %w", path, err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("writing %q: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing %q: %w", path, err)
+	}
+	return nil
 }
 
 func judgeAnswer(
@@ -622,7 +670,7 @@ func judgeAnswer(
 }
 
 func readAnswer(logger zerolog.Logger, path, stdout string) (text, source string) {
-	data, err := os.ReadFile(path)
+	data, err := readAnswerFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		logger.Warn().Err(err).Msg("reading the agent's answer file")
 	}
@@ -635,17 +683,44 @@ func readAnswer(logger zerolog.Logger, path, stdout string) (text, source string
 	return "", answerSourceNone
 }
 
+func readAnswerFile(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat answer file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("answer file %q is not a regular file, ignored", path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("opening answer file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxAnswerBytes))
+	if err != nil {
+		return nil, fmt.Errorf("reading answer file: %w", err)
+	}
+	return data, nil
+}
+
 func answerFromStdout(stdout string) string {
 	trimmed := strings.TrimSpace(stdout)
-	lines := strings.Split(trimmed, "\n")
-	for _, candidate := range []string{trimmed, lines[len(lines)-1]} {
+	enveloped := false
+	for _, candidate := range append([]string{trimmed}, strings.Split(trimmed, "\n")...) {
 		var r struct {
 			Type   string  `json:"type"`
 			Result *string `json:"result"`
 		}
-		if json.Unmarshal([]byte(candidate), &r) == nil && r.Type == "result" && r.Result != nil {
+		if json.Unmarshal([]byte(candidate), &r) != nil || r.Type == "" {
+			continue
+		}
+		enveloped = true
+		if r.Type == "result" && r.Result != nil {
 			return *r.Result
 		}
+	}
+	if enveloped {
+		return ""
 	}
 	return stdout
 }
