@@ -310,7 +310,7 @@ func runCI(t *testing.T, gremlynBin, agentBin, mode string, gremlins []string) S
 		Intensity: "certain",
 		Prompt:    "read the graph",
 	}
-	return runScenario(context.Background(), zerolog.Nop(), gremlynBin, cfg, sc, false)
+	return runScenario(context.Background(), zerolog.Nop(), gremlynBin, cfg, sc, artifacts{})
 }
 
 func TestArenaCI_ScoreDiscriminatesRobustFromFragile(t *testing.T) {
@@ -364,7 +364,7 @@ func TestArenaCI_AgentThatNeverCallsATool_Fails(t *testing.T) {
 		MCPServer: MCPServerConfig{Name: "memory", Command: fakeMCPServer()},
 	}
 	sc := ScenarioConfig{Name: "no-tool-call", Gremlins: []string{"corruption"}, Seed: 1}
-	res := runScenario(context.Background(), zerolog.Nop(), gremlynBin, cfg, sc, false)
+	res := runScenario(context.Background(), zerolog.Nop(), gremlynBin, cfg, sc, artifacts{})
 
 	assert.False(t, res.Passed(), "a scenario that tested nothing must not pass")
 	require.NotEmpty(t, res.Failures)

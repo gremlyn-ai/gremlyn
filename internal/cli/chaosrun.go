@@ -88,7 +88,9 @@ func newChaosRun(ctx context.Context, setup chaosSetup, logger zerolog.Logger) (
 		window = chaos.DefaultWindow
 	}
 	r.observer = chaos.NewObserver(combineEventSinks(sinks), logger,
-		chaos.WithWindow(window), chaos.WithAnnotationOverrides(setup.Annotations))
+		chaos.WithWindow(window), chaos.WithAnnotationOverrides(setup.Annotations),
+		chaos.WithCanary(setup.Params.CanaryFor(setup.Gremlins, setup.Seed)),
+		chaos.WithPayloads(setup.Params.Payloads(setup.Gremlins, setup.Seed)))
 	r.handler = chaos.NewGremlinHandler(gs, r.observer, logger, chaos.WithTargets(setup.TargetTools))
 	r.pipeline.RegisterHandler(r.handler)
 	r.pipeline.RegisterHandler(r.observer)

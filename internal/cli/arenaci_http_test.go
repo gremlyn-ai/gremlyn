@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -185,10 +186,11 @@ func httpCIConfig(agentBin, mode, url string) *CIConfig {
 }
 
 func httpScenario(name string, gremlins ...string) ScenarioConfig {
-	return ScenarioConfig{
-		Name: name, Gremlins: gremlins, Seed: 7, Intensity: "certain", Prompt: "read the graph",
-		Params: chaos.GremlinParams{MinTimeoutMs: 50, MaxTimeoutMs: 100},
+	sc := ScenarioConfig{Name: name, Gremlins: gremlins, Seed: 7, Intensity: "certain", Prompt: "read the graph"}
+	if slices.Contains(gremlins, "timeout") {
+		sc.Params = chaos.GremlinParams{MinTimeoutMs: 50, MaxTimeoutMs: 100}
 	}
+	return sc
 }
 
 func isolateRunFiles(t *testing.T) (dataDir, tmpDir, token string) {
@@ -213,9 +215,9 @@ func TestArenaCI_HTTP_ScoreDiscriminatesRobustFromFragile(t *testing.T) {
 			srv := newFakeHTTPMCP(t, mode)
 
 			robust := runScenario(context.Background(), zerolog.Nop(), "",
-				httpCIConfig(agentBin, "robust", srv.URL()), httpScenario("http-robust", "timeout"), false)
+				httpCIConfig(agentBin, "robust", srv.URL()), httpScenario("http-robust", "timeout"), artifacts{})
 			fragile := runScenario(context.Background(), zerolog.Nop(), "",
-				httpCIConfig(agentBin, "fragile", srv.URL()), httpScenario("http-fragile", "timeout"), false)
+				httpCIConfig(agentBin, "fragile", srv.URL()), httpScenario("http-fragile", "timeout"), artifacts{})
 			t.Logf("robust:  overall=%d coverage=%s failures=%v", robust.Report.Overall, robust.Coverage, robust.Failures)
 			t.Logf("fragile: overall=%d coverage=%s failures=%v", fragile.Report.Overall, fragile.Coverage, fragile.Failures)
 
@@ -238,8 +240,8 @@ func TestArenaCI_HTTP_SameSeedSameScore(t *testing.T) {
 	srv := newFakeHTTPMCP(t, modeSSE)
 
 	cfg := httpCIConfig(agentBin, "fragile", srv.URL())
-	first := runScenario(context.Background(), zerolog.Nop(), "", cfg, httpScenario("seed-1", "corruption"), false)
-	second := runScenario(context.Background(), zerolog.Nop(), "", cfg, httpScenario("seed-2", "corruption"), false)
+	first := runScenario(context.Background(), zerolog.Nop(), "", cfg, httpScenario("seed-1", "corruption"), artifacts{})
+	second := runScenario(context.Background(), zerolog.Nop(), "", cfg, httpScenario("seed-2", "corruption"), artifacts{})
 	require.Positive(t, first.Coverage.Injected)
 	assert.Equal(t, first.Report.Overall, second.Report.Overall)
 	assert.Equal(t, first.Coverage, second.Coverage)
@@ -261,7 +263,7 @@ func TestArenaCI_HTTP_SecretsNeverReachAFile(t *testing.T) {
 	cfg := httpCIConfig(agentBin, "robust", srv.Server.URL+"/${GREMLYN_E2E_PATH}/mcp")
 	envDump := filepath.Join(t.TempDir(), "agent-env")
 	cfg.Agent.Command = append(cfg.Agent.Command, "--dump-env", envDump)
-	res := runScenario(context.Background(), logger, "", cfg, httpScenario("secrets", "injection", "timeout"), true)
+	res := runScenario(context.Background(), logger, "", cfg, httpScenario("secrets", "injection", "timeout"), artifacts{keep: true})
 
 	agentEnv, err := os.ReadFile(envDump)
 	require.NoError(t, err)
@@ -374,7 +376,7 @@ func TestArenaCI_HTTP_FailuresAreExplained(t *testing.T) {
 			if tt.mutate != nil {
 				tt.mutate(cfg)
 			}
-			res := runScenario(context.Background(), zerolog.Nop(), "", cfg, httpScenario("fail", "corruption"), false)
+			res := runScenario(context.Background(), zerolog.Nop(), "", cfg, httpScenario("fail", "corruption"), artifacts{})
 			assert.False(t, res.Passed())
 			assert.Contains(t, strings.Join(res.Failures, "\n"), tt.want)
 			if tt.check != nil {

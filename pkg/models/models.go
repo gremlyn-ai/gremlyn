@@ -52,12 +52,13 @@ const (
 
 	OutcomeHijacked       ArenaOutcome = "hijacked"
 	OutcomeDuplicateWrite ArenaOutcome = "duplicate_write"
+	OutcomeLeaked         ArenaOutcome = "leaked"
 )
 
 func (o ArenaOutcome) Valid() bool {
 	switch o {
 	case OutcomeSurvived, OutcomeCrashed, OutcomeDegraded, OutcomeUnmeasured,
-		OutcomeHijacked, OutcomeDuplicateWrite:
+		OutcomeHijacked, OutcomeDuplicateWrite, OutcomeLeaked:
 		return true
 	}
 	return false

@@ -54,6 +54,10 @@ func main() {
 		"a top-level key the result must contain; a robust agent retries when it is missing")
 	flag.String("prompt", "", "ignored; accepted so the CI config can pass one")
 	dumpEnv := flag.String("dump-env", "", "write the agent's environment to this file")
+	answer := flag.String("answer", "", "the final answer to give the user")
+	echoResult := flag.Bool("echo-result", false, "append the last tool result to the answer, as an agent that repeats what it read")
+	answerFile := flag.String("answer-file", "", "write the answer to this file instead of stdout")
+	forward := flag.Bool("forward-result", false, "an obedient agent passes the result it obeyed to --then-tool")
 	flag.Parse()
 
 	if *dumpEnv != "" {
@@ -70,13 +74,39 @@ func main() {
 	}
 
 	preamble := strings.FieldsFunc(*before, func(r rune) bool { return r == ',' })
-	if err := run(*mode, *cfgPath, *tool, *thenTool, *expect, *retries, toolArgs, preamble); err != nil {
+	last, err := run(*mode, *cfgPath, *tool, *thenTool, *expect, *retries, toolArgs, preamble, *forward)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "refagent: %v\n", err)
+		os.Exit(1)
+	}
+	text := *answer
+	if *echoResult {
+		text += " " + last
+	}
+	if err := writeAnswer(text, *answerFile); err != nil {
 		fmt.Fprintf(os.Stderr, "refagent: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(mode, cfgPath, tool, thenTool, expectKey string, retries int, toolArgs map[string]any, before []string) error {
+func writeAnswer(text, path string) error {
+	if text == "" {
+		return nil
+	}
+	if path == "" {
+		_, err := fmt.Println(text)
+		return err
+	}
+	return os.WriteFile(path, []byte(text), 0o600)
+}
+
+func run(mode, cfgPath, tool, thenTool, expectKey string, retries int, toolArgs map[string]any, before []string, forward bool) (string, error) {
+	last := ""
+	err := converse(mode, cfgPath, tool, thenTool, expectKey, retries, toolArgs, before, forward, &last)
+	return last, err
+}
+
+func converse(mode, cfgPath, tool, thenTool, expectKey string, retries int, toolArgs map[string]any, before []string, forward bool, last *string) error {
 	if cfgPath == "" {
 		return fmt.Errorf("--mcp-config is required")
 	}
@@ -167,8 +197,14 @@ func run(mode, cfgPath, tool, thenTool, expectKey string, retries int, toolArgs 
 			return nil
 		}
 
+		*last = string(resp.Result)
+
 		if mode == "obedient" && carriesInstruction(resp, thenTool) {
-			_, _ = call(thenTool, map[string]any{})
+			thenArgs := map[string]any{}
+			if forward {
+				thenArgs["text"] = string(resp.Result)
+			}
+			_, _ = call(thenTool, thenArgs)
 			return nil
 		}
 		if !suspicious(resp, expectKey) {

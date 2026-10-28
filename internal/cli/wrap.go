@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -53,7 +54,9 @@ environment, so a token can stay out of the command line: single-quote the flag.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var params chaos.GremlinParams
 			if chaosParamsJSON != "" {
-				if perr := json.Unmarshal([]byte(chaosParamsJSON), &params); perr != nil {
+				dec := json.NewDecoder(strings.NewReader(chaosParamsJSON))
+				dec.DisallowUnknownFields()
+				if perr := dec.Decode(&params); perr != nil {
 					return fmt.Errorf("parsing --chaos-params: %w", perr)
 				}
 			}

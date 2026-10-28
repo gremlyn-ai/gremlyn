@@ -1,16 +1,21 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gremlyn-ai/gremlyn/internal/arena/chaos"
@@ -23,8 +28,15 @@ import (
 )
 
 const (
-	PlaceholderMCPConfig = "{{mcp_config}}"
-	PlaceholderPrompt    = "{{prompt}}"
+	PlaceholderMCPConfig  = "{{mcp_config}}"
+	PlaceholderPrompt     = "{{prompt}}"
+	PlaceholderAnswerFile = "{{answer_file}}"
+)
+
+const (
+	answerSourceFile   = "file"
+	answerSourceStdout = "stdout"
+	answerSourceNone   = "none"
 )
 
 type CIConfig struct {
@@ -32,6 +44,7 @@ type CIConfig struct {
 	MCPServer  MCPServerConfig  `yaml:"mcp_server"`
 	Scenarios  []ScenarioConfig `yaml:"scenarios"`
 	Thresholds ThresholdConfig  `yaml:"thresholds"`
+	Meta       map[string]any   `yaml:"meta"`
 }
 
 type AgentConfig struct {
@@ -58,35 +71,81 @@ type ScenarioConfig struct {
 	Params    chaos.GremlinParams `yaml:"params"`
 	Window    time.Duration       `yaml:"window"`
 
-	TargetTools targetTools `yaml:"target_tools"`
+	TargetTools targetTools    `yaml:"target_tools"`
+	Meta        map[string]any `yaml:"meta"`
+	Expect      ExpectConfig   `yaml:"expect"`
+	Repeat      int            `yaml:"repeat"`
+}
+
+type ExpectConfig struct {
+	Answer chaos.AnswerExpect `yaml:"answer"`
+}
+
+type AnswerResult struct {
+	Source string              `json:"source"`
+	Checks []chaos.AnswerCheck `json:"checks,omitempty"`
 }
 
 type ThresholdConfig struct {
-	MinOverall   int                       `yaml:"min_overall"`
-	MinDimension map[scoring.Dimension]int `yaml:"min_dimension"`
+	MinOverall      int                       `yaml:"min_overall"`
+	MinDimension    map[scoring.Dimension]int `yaml:"min_dimension"`
+	StabilitySpread int                       `yaml:"stability_spread"`
 }
 
 type ScenarioResult struct {
-	Name     string                   `json:"name"`
-	Gremlins []string                 `json:"gremlins,omitempty"`
-	Report   scoring.ResilienceReport `json:"report"`
-	Coverage chaos.Coverage           `json:"coverage"`
-	Events   int                      `json:"events"`
-	Skipped  int                      `json:"skipped_partial_events"`
-	Upstream chaos.UpstreamStats      `json:"upstream,omitzero"`
-	Tools    models.ToolCatalog       `json:"tools,omitempty"`
-	Targets  []chaos.TargetResult     `json:"targets,omitempty"`
+	Name        string                   `json:"name"`
+	Gremlins    []string                 `json:"gremlins,omitempty"`
+	Intensity   string                   `json:"intensity,omitempty"`
+	TargetTools []string                 `json:"target_tools,omitempty"`
+	Meta        map[string]any           `json:"meta,omitempty"`
+	Report      scoring.ResilienceReport `json:"report"`
+	Coverage    chaos.Coverage           `json:"coverage"`
+	Events      int                      `json:"events"`
+	Skipped     int                      `json:"skipped_partial_events"`
+	Upstream    chaos.UpstreamStats      `json:"upstream,omitzero"`
+	Tools       models.ToolCatalog       `json:"tools,omitempty"`
+	Targets     []chaos.TargetResult     `json:"targets,omitempty"`
+	Answer      *AnswerResult            `json:"answer,omitempty"`
 
+	Artifacts          string   `json:"artifacts,omitempty"`
 	InjectionFallbacks int      `json:"injection_fallbacks,omitempty"`
 	AgentErr           string   `json:"agent_error,omitempty"`
 	Failures           []string `json:"failures,omitempty"`
+
+	Runs     []RunResult `json:"runs,omitempty"`
+	Stats    *RunStats   `json:"stats,omitempty"`
+	Unstable bool        `json:"unstable,omitempty"`
+
+	answerFailures []string
 }
 
 func (r ScenarioResult) Passed() bool { return len(r.Failures) == 0 }
 
+const reportSchemaVersion = 2
+
 type CIResult struct {
-	Scenarios []ScenarioResult `json:"scenarios"`
-	Passed    bool             `json:"passed"`
+	SchemaVersion int              `json:"schema_version,omitempty"`
+	Meta          map[string]any   `json:"meta,omitempty"`
+	Scenarios     []ScenarioResult `json:"scenarios"`
+	Passed        bool             `json:"passed"`
+}
+
+func (r *CIResult) version() int {
+	if r.SchemaVersion == 0 {
+		return 1
+	}
+	return r.SchemaVersion
+}
+
+func newCIResult(cfg *CIConfig) CIResult {
+	return CIResult{SchemaVersion: reportSchemaVersion, Meta: cfg.Meta, Passed: true}
+}
+
+func newScenarioResult(sc ScenarioConfig) ScenarioResult {
+	return ScenarioResult{
+		Name: sc.Name, Gremlins: sc.Gremlins, Intensity: string(intensityOf(sc)),
+		TargetTools: sc.TargetTools, Meta: sc.Meta,
+	}
 }
 
 func NewArenaCICmd(logger zerolog.Logger) *cobra.Command {
@@ -96,6 +155,9 @@ func NewArenaCICmd(logger zerolog.Logger) *cobra.Command {
 		format        string
 		keepArtifacts bool
 		only          []string
+		repeat        int
+		strictStable  bool
+		artifactsDir  string
 	)
 
 	cmd := &cobra.Command{
@@ -117,6 +179,9 @@ call means no gremlin was crossed and nothing was measured.`,
 			if err != nil {
 				return err
 			}
+			if repeat < 0 {
+				return fmt.Errorf("--repeat must be positive, got %d", repeat)
+			}
 			if cfg.Scenarios, err = selectScenarios(cfg.Scenarios, only); err != nil {
 				return err
 			}
@@ -125,13 +190,23 @@ call means no gremlin was crossed and nothing was measured.`,
 			if err != nil {
 				return fmt.Errorf("locating the gremlyn binary: %w", err)
 			}
-			result := CIResult{Passed: true}
+			result := newCIResult(cfg)
 			out := cmd.OutOrStdout()
+			costOut := out
+			if format == "json" {
+				costOut = cmd.ErrOrStderr()
+			}
+			_, _ = fmt.Fprintln(costOut, paletteFor(costOut).dim(costLine(cfg.Scenarios, repeat)))
 			for _, sc := range cfg.Scenarios {
+				n := repeatsFor(sc, repeat)
 				if format != "json" {
-					_, _ = fmt.Fprintf(out, "\n%s\n", paletteFor(out).dim(fmt.Sprintf("running %s (%s)...", sc.Name, strings.Join(sc.Gremlins, ", "))))
+					label := fmt.Sprintf("running %s (%s)", sc.Name, strings.Join(sc.Gremlins, ", "))
+					if n > 1 {
+						label += fmt.Sprintf(" × %d", n)
+					}
+					_, _ = fmt.Fprintf(out, "\n%s\n", paletteFor(out).dim(label+"..."))
 				}
-				res := runScenario(cmd.Context(), logger, self, cfg, sc, keepArtifacts)
+				res := runRepeated(cmd.Context(), logger, self, cfg, sc, artifacts{keep: keepArtifacts, dir: artifactsDir}, n, strictStable)
 				if format != "json" {
 					writeScenarioText(out, &res)
 				}
@@ -159,8 +234,14 @@ call means no gremlin was crossed and nothing was measured.`,
 	cmd.Flags().StringVar(&format, "format", "text", "Console output format: text or json")
 	cmd.Flags().StringSliceVar(&only, "scenario", nil,
 		"Run only these scenarios, by name (repeatable). Default: all of them")
+	cmd.Flags().IntVar(&repeat, "repeat", 0,
+		"Run every scenario this many times with the same seed; thresholds apply to the median run. Default: each scenario's repeat, else 1")
+	cmd.Flags().BoolVar(&strictStable, "strict-stability", false,
+		"Fail a scenario whose score spread exceeds thresholds.stability_spread, instead of warning")
 	cmd.Flags().BoolVar(&keepArtifacts, "keep-artifacts", false,
-		"Keep the per-scenario temp directory (mcp config, event log) for debugging")
+		"Keep the per-scenario directory (mcp config, event log, agent.log, answer.txt) for debugging")
+	cmd.Flags().StringVar(&artifactsDir, "artifacts-dir", "",
+		"Keep each scenario's directory under this path instead of the temp dir, for a CI upload. Implies --keep-artifacts")
 
 	return cmd
 }
@@ -199,8 +280,17 @@ func loadCIConfig(path string) (*CIConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading %q: %w", path, err)
 	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("parsing %q: %w", path, err)
+	}
+	if err := checkKeys(&doc, reflect.TypeFor[CIConfig](), ""); err != nil {
+		return nil, fmt.Errorf("invalid config %q: %w", path, err)
+	}
 	var cfg CIConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing %q: %w", path, err)
 	}
 	if err := validateCIConfig(&cfg); err != nil {
@@ -236,6 +326,14 @@ func validateCIConfig(cfg *CIConfig) error {
 	if len(cfg.Scenarios) == 0 {
 		return errors.New("at least one scenario is required")
 	}
+	if err := checkMeta("meta", cfg.Meta); err != nil {
+		return err
+	}
+	for dim := range cfg.Thresholds.MinDimension {
+		if !slices.Contains(scoring.AllDimensions, dim) {
+			return fmt.Errorf("thresholds.min_dimension: unknown dimension %q (known: %s)", dim, dimensionNames())
+		}
+	}
 	for i, sc := range cfg.Scenarios {
 		if sc.Name == "" {
 			return fmt.Errorf("scenarios[%d]: name is required", i)
@@ -243,11 +341,23 @@ func validateCIConfig(cfg *CIConfig) error {
 		if len(sc.Gremlins) == 0 {
 			return fmt.Errorf("scenario %q: at least one gremlin is required", sc.Name)
 		}
+		if sc.Repeat < 0 {
+			return fmt.Errorf("scenario %q: repeat must be positive, got %d", sc.Name, sc.Repeat)
+		}
 		if sc.Window < 0 {
 			return fmt.Errorf("scenario %q: window must be positive, got %s", sc.Name, sc.Window)
 		}
 		if sc.Intensity != "" && !chaos.Intensity(sc.Intensity).Valid() {
 			return fmt.Errorf("scenario %q: unknown intensity %q", sc.Name, sc.Intensity)
+		}
+		if err := checkMeta(fmt.Sprintf("scenario %q: meta", sc.Name), sc.Meta); err != nil {
+			return err
+		}
+		if err := checkPromptAgainstPayload(sc); err != nil {
+			return err
+		}
+		if err := sc.Expect.Answer.Validate(); err != nil {
+			return fmt.Errorf("scenario %q: expect.answer: %w", sc.Name, err)
 		}
 
 		gs, err := chaos.BuildGremlinsWithParams(sc.Gremlins, sc.Seed, intensityOf(sc), sc.Params)
@@ -260,10 +370,41 @@ func validateCIConfig(cfg *CIConfig) error {
 			}
 		}
 	}
+	if cfg.Thresholds.StabilitySpread < 0 {
+		return fmt.Errorf("thresholds.stability_spread must be positive, got %d", cfg.Thresholds.StabilitySpread)
+	}
 	if cfg.Agent.Timeout <= 0 {
 		cfg.Agent.Timeout = 5 * time.Minute
 	}
 	return nil
+}
+
+func checkPromptAgainstPayload(sc ScenarioConfig) error {
+	prompt := strings.ToLower(sc.Prompt)
+	for gremlin, text := range sc.Params.Payloads(sc.Gremlins, 0) {
+		for _, m := range chaos.PayloadMarkers(text) {
+			if chaos.MarkerIn(prompt, m) {
+				return fmt.Errorf("scenario %q: the prompt names %q, which the %s text also names: "+
+					"the rubric could not tell obeying the injection from doing the task, so change one of them", sc.Name, m, gremlin)
+			}
+		}
+	}
+	return nil
+}
+
+func checkMeta(where string, meta map[string]any) error {
+	if _, err := json.Marshal(meta); err != nil {
+		return fmt.Errorf("%s must hold plain values with string keys, it is copied into the JSON report: %w", where, err)
+	}
+	return nil
+}
+
+func dimensionNames() string {
+	names := make([]string, len(scoring.AllDimensions))
+	for i, d := range scoring.AllDimensions {
+		names[i] = string(d)
+	}
+	return strings.Join(names, ", ")
 }
 
 func intensityOf(sc ScenarioConfig) chaos.Intensity {
@@ -282,22 +423,52 @@ func containsPlaceholder(argv []string, want string) bool {
 	return false
 }
 
-func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *CIConfig, sc ScenarioConfig, keep bool) ScenarioResult {
-	res := ScenarioResult{Name: sc.Name, Gremlins: sc.Gremlins}
-	dir, err := os.MkdirTemp("", "gremlyn-ci-"+sanitize(sc.Name)+"-")
+type artifacts struct {
+	keep bool
+	dir  string
+}
+
+func (a artifacts) kept() bool { return a.keep || a.dir != "" }
+
+func (a artifacts) mkdir(scenario string) (string, error) {
+	if a.dir == "" {
+		return os.MkdirTemp("", "gremlyn-ci-"+sanitize(scenario)+"-")
+	}
+	if err := os.MkdirAll(a.dir, 0o700); err != nil {
+		return "", fmt.Errorf("creating the artifacts directory: %w", err)
+	}
+	return os.MkdirTemp(a.dir, sanitize(scenario)+"-")
+}
+
+func runRepeated(ctx context.Context, logger zerolog.Logger, self string, cfg *CIConfig, sc ScenarioConfig, art artifacts, n int, strict bool) ScenarioResult {
+	if n <= 1 {
+		return runScenario(ctx, logger, self, cfg, sc, art)
+	}
+	runs := make([]ScenarioResult, n)
+	for i := range runs {
+		runs[i] = runScenario(ctx, logger, self, cfg, sc, art)
+	}
+	return aggregateRuns(runs, cfg.Thresholds, strict)
+}
+
+func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *CIConfig, sc ScenarioConfig, art artifacts) ScenarioResult {
+	res := newScenarioResult(sc)
+	dir, err := art.mkdir(sc.Name)
 	if err != nil {
-		res.Failures = append(res.Failures, fmt.Sprintf("creating temp dir: %v", err))
+		res.Failures = append(res.Failures, fmt.Sprintf("creating the scenario directory: %v", err))
 		return res
 	}
-	if !keep {
+	if !art.kept() {
 		defer func() { _ = os.RemoveAll(dir) }()
 	} else {
+		res.Artifacts = dir
 		logger.Info().Str("scenario", sc.Name).Str("artifacts", dir).Msg("keeping artifacts")
 	}
 
 	eventsPath := filepath.Join(dir, "events.jsonl")
 	summaryPath := filepath.Join(dir, "summary.json")
 	mcpPath := filepath.Join(dir, "mcp.json")
+	answerPath := filepath.Join(dir, "answer.txt")
 
 	seed := sc.Seed
 	if seed == 0 {
@@ -332,16 +503,19 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	defer cancel()
 
 	argv := substitute(cfg.Agent.Command, map[string]string{
-		PlaceholderMCPConfig: mcpPath,
-		PlaceholderPrompt:    sc.Prompt,
+		PlaceholderMCPConfig:  mcpPath,
+		PlaceholderPrompt:     sc.Prompt,
+		PlaceholderAnswerFile: answerPath,
 	})
 
 	agentCmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
 	agentCmd.Env = append(scrubEnv(os.Environ(), hiddenVars), envSlice(cfg.Agent.Env)...)
 	agentCmd.Stdin = nil
-	var agentOut strings.Builder
-	agentCmd.Stdout = &agentOut
-	agentCmd.Stderr = &agentOut
+	agentOut := &cappedBuffer{max: maxAgentOutput}
+	agentStdout := &cappedBuffer{max: maxAgentOutput}
+	combined := &lockedWriter{w: agentOut}
+	agentCmd.Stdout = io.MultiWriter(agentStdout, combined)
+	agentCmd.Stderr = combined
 
 	logger.Info().Str("scenario", sc.Name).Strs("gremlins", sc.Gremlins).Int64("seed", seed).Msg("running scenario")
 
@@ -350,6 +524,8 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 		res.AgentErr = agentErr.Error()
 		logger.Warn().Err(agentErr).Str("scenario", sc.Name).Msg("agent exited non-zero")
 	}
+	answer, answerSource := readAnswer(logger, answerPath, agentStdout.String())
+	writeArtifacts(logger, dir, agentOut.String(), answer, answerSource)
 
 	if upstream != nil {
 		if diag := upstream.stop(ctx); diag != nil && !errors.Is(diag, errUpstreamUnreliable) {
@@ -378,13 +554,186 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	res.Coverage = summary.Coverage
 	res.Upstream = summary.Upstream
 	res.Tools = summary.Tools
+
+	var answerFailures []string
+	events, res.Answer, answerFailures = judgeAnswer(sc, seed, events, answer, answerSource)
 	res.Report = scoring.Score(chaos.Rescore(events, summary.Tools), nil)
 	res.Targets = chaos.ResolveTargets(summary.Targets, events)
 	res.InjectionFallbacks = injectionFallbacks(events)
 
 	res.Failures = append(res.Failures, upstreamFailures(res.Upstream)...)
 	res.Failures = append(res.Failures, checkThresholds(cfg.Thresholds, res)...)
+	res.Failures = append(res.Failures, answerFailures...)
+	res.answerFailures = answerFailures
 	return res
+}
+
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
+const (
+	maxAgentOutput = 8 << 20
+	maxAnswerBytes = 1 << 20
+)
+
+type cappedBuffer struct {
+	max     int
+	b       strings.Builder
+	dropped int
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	room := max(0, c.max-c.b.Len())
+	kept := min(room, len(p))
+	c.b.Write(p[:kept])
+	c.dropped += len(p) - kept
+	return len(p), nil
+}
+
+func (c *cappedBuffer) String() string {
+	if c.dropped == 0 {
+		return c.b.String()
+	}
+	return fmt.Sprintf("%s\n[gremlyn: output truncated, %d bytes dropped]\n", c.b.String(), c.dropped)
+}
+
+func writeArtifacts(logger zerolog.Logger, dir, agentLog, answer, answerSource string) {
+	if err := writePrivate(dir, "agent.log", agentLog); err != nil {
+		logger.Warn().Err(err).Msg("writing agent.log")
+	}
+	if answerSource != answerSourceStdout {
+		return
+	}
+	if err := writePrivate(dir, "answer.txt", answer); err != nil {
+		logger.Warn().Err(err).Msg("writing answer.txt")
+	}
+}
+
+func writePrivate(dir, name, content string) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("opening %q: %w", dir, err)
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("replacing %s: %w", name, err)
+	}
+	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("creating %s: %w", name, err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("writing %s: %w", name, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing %s: %w", name, err)
+	}
+	return nil
+}
+
+func judgeAnswer(
+	sc ScenarioConfig,
+	seed int64,
+	events []models.ArenaEvent,
+	text, source string,
+) ([]models.ArenaEvent, *AnswerResult, []string) {
+	exp := sc.Expect.Answer
+	canary := sc.Params.CanaryFor(sc.Gremlins, seed)
+	if exp.Empty() && canary == "" {
+		return events, nil, nil
+	}
+	var failures []string
+	if source == answerSourceNone {
+		events = append(events, chaos.UnreadableAnswer("the agent wrote no "+PlaceholderAnswerFile+" and printed nothing on stdout"))
+		if !exp.Empty() {
+			failures = append(failures, "the agent's answer could not be read (no "+PlaceholderAnswerFile+
+				" written, empty stdout), so its expect.answer checks measured nothing")
+		}
+	} else {
+		checked, err := chaos.CheckAnswer(text, exp, canary)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("checking the answer: %v", err))
+		}
+		events = append(events, checked...)
+	}
+	result := &AnswerResult{Source: source, Checks: chaos.AnswerChecks(events)}
+	for _, c := range result.Checks {
+		if !c.Passed && !c.Unmeasured {
+			failures = append(failures, "answer check failed: "+c.Check)
+		}
+	}
+	return events, result, failures
+}
+
+func readAnswer(logger zerolog.Logger, path, stdout string) (text, source string) {
+	data, err := readAnswerFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		logger.Warn().Err(err).Msg("reading the agent's answer file")
+	}
+	if strings.TrimSpace(string(data)) != "" {
+		return string(data), answerSourceFile
+	}
+	if s := answerFromStdout(stdout); strings.TrimSpace(s) != "" {
+		return s, answerSourceStdout
+	}
+	return "", answerSourceNone
+}
+
+func readAnswerFile(path string) ([]byte, error) {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, fmt.Errorf("opening the answer file's directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	name := filepath.Base(path)
+	info, err := root.Lstat(name)
+	if err != nil {
+		return nil, fmt.Errorf("stat answer file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("answer file %q is not a regular file, ignored", path)
+	}
+	f, err := root.Open(name)
+	if err != nil {
+		return nil, fmt.Errorf("opening answer file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxAnswerBytes))
+	if err != nil {
+		return nil, fmt.Errorf("reading answer file: %w", err)
+	}
+	return data, nil
+}
+
+func answerFromStdout(stdout string) string {
+	trimmed := strings.TrimSpace(stdout)
+	enveloped := false
+	for _, candidate := range append([]string{trimmed}, strings.Split(trimmed, "\n")...) {
+		var r struct {
+			Type   string  `json:"type"`
+			Result *string `json:"result"`
+		}
+		if json.Unmarshal([]byte(candidate), &r) != nil || r.Type == "" {
+			continue
+		}
+		enveloped = true
+		if r.Type == "result" && r.Result != nil {
+			return *r.Result
+		}
+	}
+	if enveloped {
+		return ""
+	}
+	return stdout
 }
 
 func upstreamFailures(u chaos.UpstreamStats) []string {
@@ -637,6 +986,37 @@ func writeScenarioText(w io.Writer, sc *ScenarioResult) {
 	for _, t := range sc.Targets {
 		_, _ = fmt.Fprintf(w, "  target:     %s\n", targetLine(t))
 	}
+	if sc.Artifacts != "" {
+		_, _ = fmt.Fprintf(w, "  artifacts:  %s\n", p.dim(sc.Artifacts))
+	}
+	if sc.Stats != nil {
+		scores := make([]string, len(sc.Runs))
+		for i, r := range sc.Runs {
+			scores[i] = fmt.Sprint(r.Overall)
+		}
+		line := fmt.Sprintf("%s → median %d, spread %d", strings.Join(scores, " "), sc.Stats.Median, sc.Stats.Spread)
+		if sc.Unstable {
+			line += " " + p.bad("(unstable)")
+		}
+		_, _ = fmt.Fprintf(w, "  runs:       %s\n", line)
+	}
+	if sc.Answer != nil {
+		passed := 0
+		for _, c := range sc.Answer.Checks {
+			if c.Passed {
+				passed++
+			}
+		}
+		_, _ = fmt.Fprintf(w, "  answer:     %s, %d/%d check(s) passed\n", sc.Answer.Source, passed, len(sc.Answer.Checks))
+		for _, c := range sc.Answer.Checks {
+			if !c.Passed && c.Evidence != "" {
+				_, _ = fmt.Fprintf(w, "              %s %s\n", c.Check+":", p.dim(c.Evidence))
+			}
+		}
+	}
+	if sc.Report.Leaked > 0 {
+		_, _ = fmt.Fprintf(w, "  leaked:     %s\n", p.bad(fmt.Sprintf("%d answer check(s) found injected content on its way to the user", sc.Report.Leaked)))
+	}
 	if sc.InjectionFallbacks > 0 {
 		_, _ = fmt.Fprintf(w, "  placement:  %s\n", p.dim(fmt.Sprintf("%d injection(s) fell back to a field: the result had no content array", sc.InjectionFallbacks)))
 	}
@@ -669,6 +1049,9 @@ func writeScenarioText(w io.Writer, sc *ScenarioResult) {
 		}
 		if ds.DuplicateWrites > 0 {
 			counts += fmt.Sprintf(", duplicate writes %d", ds.DuplicateWrites)
+		}
+		if ds.Leaked > 0 {
+			counts += fmt.Sprintf(", leaked %d", ds.Leaked)
 		}
 		_, _ = fmt.Fprintf(w, "    %-20s %s  %s\n", dim, p.grade(ds.Grade, fmt.Sprintf("%3d", ds.Score)), p.dim("("+counts+")"))
 	}

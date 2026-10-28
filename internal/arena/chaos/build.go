@@ -67,6 +67,7 @@ type GremlinParams struct {
 	LoopMessage   string `json:"loop_message,omitempty" yaml:"loop_message,omitempty"`
 
 	InjectionPlacement string `json:"injection_placement,omitempty" yaml:"injection_placement,omitempty"`
+	Canary             *bool  `json:"canary,omitempty" yaml:"canary,omitempty"`
 }
 
 const (
@@ -154,6 +155,28 @@ func (g GremlinParams) withDefaults() GremlinParams {
 	return g
 }
 
+func withCanary(text, canary string) string {
+	if canary == "" {
+		return text
+	}
+	return text + " (ref " + canary + ")"
+}
+
+func (g GremlinParams) Payloads(names []string, seed int64) map[string]string {
+	p := g.withDefaults()
+	c := g.CanaryFor(names, seed)
+	out := make(map[string]string, 2)
+	for _, raw := range names {
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "injection":
+			out["injection"] = withCanary(p.InjectionText, c)
+		case "identity":
+			out["identity"] = withCanary(p.IdentityText, c)
+		}
+	}
+	return out
+}
+
 func BuildGremlins(names []string, seed int64, intensity Intensity) ([]gremlins.Gremlin, error) {
 	return BuildGremlinsWithParams(names, seed, intensity, GremlinParams{})
 }
@@ -177,7 +200,11 @@ func BuildGremlinsWithParams(
 	if err := params.Validate(); err != nil {
 		return nil, fmt.Errorf("gremlin params: %w", err)
 	}
+	set := params
 	params = params.withDefaults()
+	c := set.CanaryFor(names, seed)
+	params.InjectionText = withCanary(params.InjectionText, c)
+	params.IdentityText = withCanary(params.IdentityText, c)
 
 	p := intensity.probability()
 	opt := gremlins.WithSeed(seed)
@@ -205,10 +232,36 @@ func BuildGremlinsWithParams(
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no gremlins requested")
 	}
-	if params.InjectionPlacement != "" && !slices.ContainsFunc(PlacedGremlins(), func(n string) bool { return seen[n] }) {
-		return nil, fmt.Errorf("injection_placement applies to %v, none of which is in %v", PlacedGremlins(), names)
+	if err := set.unread(seen); err != nil {
+		return nil, err
 	}
 	return out, nil
+}
+
+func (g GremlinParams) unread(seen map[string]bool) error {
+	for _, p := range []struct {
+		name    string
+		set     bool
+		readers []string
+	}{
+		{"min_delay_ms", g.MinDelayMs != 0, []string{"latency"}},
+		{"max_delay_ms", g.MaxDelayMs != 0, []string{"latency"}},
+		{"min_timeout_ms", g.MinTimeoutMs != 0, []string{"timeout"}},
+		{"max_timeout_ms", g.MaxTimeoutMs != 0, []string{"timeout"}},
+		{"payload_bytes", g.PayloadBytes != 0, []string{"overflow"}},
+		{"max_loops", g.MaxLoops != 0, []string{"loop"}},
+		{"loop_message", g.LoopMessage != "", []string{"loop"}},
+		{"fake_tool", g.FakeTool != "", []string{"hallucination"}},
+		{"injection_text", g.InjectionText != "", []string{"injection"}},
+		{"identity_text", g.IdentityText != "", []string{"identity"}},
+		{"injection_placement", g.InjectionPlacement != "", PlacedGremlins()},
+		{"canary", g.Canary != nil, []string{"identity", "injection"}},
+	} {
+		if p.set && !slices.ContainsFunc(p.readers, func(n string) bool { return seen[n] }) {
+			return fmt.Errorf("%s set but no gremlin of this scenario reads it (read by %s)", p.name, strings.Join(p.readers, ", "))
+		}
+	}
+	return nil
 }
 
 func buildOne(name string, p float64, opt gremlins.Option, prm GremlinParams) (gremlins.Gremlin, error) {

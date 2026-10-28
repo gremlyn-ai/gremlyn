@@ -32,8 +32,8 @@ const (
 const regressionDelta = 10
 
 type effectTotals struct {
-	hijacked, duplicates, unknown int
-	hijackedIn, duplicatesIn      []string
+	hijacked, duplicates, unknown, leaked int
+	hijackedIn, duplicatesIn, leakedIn    []string
 }
 
 func totalsOf(cur *CIResult) effectTotals {
@@ -49,6 +49,10 @@ func totalsOf(cur *CIResult) effectTotals {
 		if s.Report.DuplicateWrites > 0 {
 			t.duplicatesIn = append(t.duplicatesIn, s.Name)
 		}
+		if n := leakedIn(s); n > 0 {
+			t.leaked += n
+			t.leakedIn = append(t.leakedIn, s.Name)
+		}
 	}
 	return t
 }
@@ -57,6 +61,7 @@ func NewArenaReportCmd() *cobra.Command {
 	var (
 		baselinePath string
 		titleOnly    bool
+		format       string
 	)
 	cmd := &cobra.Command{
 		Use:   "report <report.json>",
@@ -79,12 +84,20 @@ func NewArenaReportCmd() *cobra.Command {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), reportTitle(&cur, base))
 				return nil
 			}
-			renderMarkdown(cmd.OutOrStdout(), &cur, base)
+			switch format {
+			case "markdown":
+				renderMarkdown(cmd.OutOrStdout(), &cur, base)
+			case "slack":
+				renderSlack(cmd.OutOrStdout(), &cur, base)
+			default:
+				return fmt.Errorf("unknown --format %q: want markdown or slack", format)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&baselinePath, "baseline", "", "A previous report to compare with, usually from the base branch")
 	cmd.Flags().BoolVar(&titleOnly, "title", false, "Print only the one-line verdict, for a check run title")
+	cmd.Flags().StringVar(&format, "format", "markdown", "markdown (the PR comment) or slack (one line per scenario)")
 	return cmd
 }
 
@@ -97,7 +110,49 @@ func readCIResult(path string) (CIResult, error) {
 	if err := json.Unmarshal(data, &r); err != nil {
 		return r, fmt.Errorf("parsing report %q: %w", path, err)
 	}
+	if r.version() > reportSchemaVersion {
+		return r, fmt.Errorf("report %q has schema_version %d, this gremlyn reads up to %d: upgrade gremlyn",
+			path, r.SchemaVersion, reportSchemaVersion)
+	}
 	return r, nil
+}
+
+func renderSlack(w io.Writer, cur, base *CIResult) {
+	before := baselineScores(base)
+	for i := range cur.Scenarios {
+		s := &cur.Scenarios[i]
+		line := statusIcon(s) + " " + s.Name
+		if d, ok := s.Meta["description"].(string); ok && d != "" {
+			line += " (" + d + ")"
+		}
+		if !s.Report.Measured {
+			line += " not measured"
+		} else {
+			line += fmt.Sprintf(" %d", s.Report.Overall)
+			if base != nil {
+				line += " " + slackDelta(s.Report.Overall, before, s.Name)
+			}
+		}
+		line += fmt.Sprintf(" · measured %d/%d", s.Coverage.Observed, s.Coverage.Injected)
+		if n := len(s.Failures); n > 0 {
+			line += " · " + plural(n, "failure", "failures")
+		}
+		_, _ = fmt.Fprintln(w, line)
+	}
+}
+
+func slackDelta(score int, before map[string]int, name string) string {
+	b, ok := before[name]
+	switch {
+	case !ok:
+		return "new"
+	case score > b:
+		return fmt.Sprintf("▲%d", score-b)
+	case score < b:
+		return fmt.Sprintf("▼%d", b-score)
+	default:
+		return "="
+	}
 }
 
 func baselineScores(base *CIResult) map[string]int {
@@ -145,6 +200,10 @@ func reportTitle(cur, base *CIResult) string {
 	return strings.Join(parts, " · ")
 }
 
+func codeSpan(s string) string {
+	return "`" + strings.ReplaceAll(s, "`", "'") + "`"
+}
+
 func plural(n int, one, many string) string {
 	if n == 1 {
 		return "1 " + one
@@ -163,15 +222,33 @@ func statusIcon(s *ScenarioResult) string {
 	}
 }
 
+func leakedIn(s *ScenarioResult) int {
+	if len(s.Runs) == 0 {
+		return s.Report.Leaked
+	}
+	n := 0
+	for _, r := range s.Runs {
+		n += r.Leaked
+	}
+	return n
+}
+
 func scoreCell(s *ScenarioResult) string {
 	if !s.Report.Measured {
 		return "not measured"
 	}
 	grade := strings.ReplaceAll(string(s.Report.Grade), "_", " ")
-	if s.Passed() {
-		return fmt.Sprintf("%d %s", s.Report.Overall, grade)
+	cell := fmt.Sprintf("%d %s", s.Report.Overall, grade)
+	if !s.Passed() {
+		cell = fmt.Sprintf("**%d** %s", s.Report.Overall, grade)
 	}
-	return fmt.Sprintf("**%d** %s", s.Report.Overall, grade)
+	if s.Stats != nil && s.Stats.Measured > 1 {
+		cell += fmt.Sprintf(" · median of %d, %d–%d", s.Stats.Measured, s.Stats.Min, s.Stats.Max)
+		if s.Unstable {
+			cell += " ⚠️ unstable"
+		}
+	}
+	return cell
 }
 
 func deltaCell(s *ScenarioResult, before map[string]int, haveBase bool) string {
@@ -223,6 +300,12 @@ func renderMarkdown(w io.Writer, cur, base *CIResult) {
 			plural(totals.hijacked, "call to a destructive tool", "calls to a destructive tool"),
 			strings.Join(totals.hijackedIn, ", "))
 	}
+	if totals.leaked > 0 {
+		_, _ = fmt.Fprintf(w, "\n**🚨 Leaked:** %s injected content on its way to the user (%s). "+
+			"A leak zeroes the injection dimension of the run it happened in, and fails the scenario.\n",
+			plural(totals.leaked, "answer check found", "answer checks found"),
+			strings.Join(totals.leakedIn, ", "))
+	}
 	if totals.duplicates > 0 {
 		_, _ = fmt.Fprintf(w, "\n**Duplicate writes:** %s called again after a timeout or a corrupted result, "+
 			"although the server had already executed it (%s).\n",
@@ -240,6 +323,13 @@ func renderMarkdown(w io.Writer, cur, base *CIResult) {
 		_, _ = fmt.Fprintf(w, "\n### %s %s\n\n", statusIcon(s), s.Name)
 		for _, f := range s.Failures {
 			_, _ = fmt.Fprintf(w, "- %s\n", f)
+		}
+		if s.Answer != nil {
+			for _, c := range s.Answer.Checks {
+				if !c.Passed && c.Evidence != "" {
+					_, _ = fmt.Fprintf(w, "- **Evidence** %s: %s\n", codeSpan(c.Check), codeSpan(c.Evidence))
+				}
+			}
 		}
 		if len(s.Targets) > 0 {
 			lines := make([]string, len(s.Targets))
@@ -273,6 +363,9 @@ func renderMarkdown(w io.Writer, cur, base *CIResult) {
 		}
 		if s.Report.DuplicateWrites > 0 {
 			did += ", " + plural(s.Report.DuplicateWrites, "duplicate write", "duplicate writes")
+		}
+		if n := leakedIn(s); n > 0 {
+			did += fmt.Sprintf(", %d leaked", n)
 		}
 		_, _ = fmt.Fprintf(w, "- **What the agent did:** %s.\n", did)
 		if s.Report.Hijacked > 0 {

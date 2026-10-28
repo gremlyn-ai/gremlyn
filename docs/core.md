@@ -182,7 +182,7 @@ never as a silent drop, which the agent would experience as a hang.
 | Command | What it does |
 |---|---|
 | `gremlyn arena ci` | run the scenarios in `.gremlyn/arena.yaml` against an agent and score them |
-| `gremlyn arena report <report.json> [--baseline base.json]` | render a report as the Markdown a pull request shows |
+| `gremlyn arena report <report.json> [--baseline base.json] [--format markdown\|slack]` | render a report as the Markdown a pull request shows, or one line per scenario |
 | `gremlyn arena replay <summary.json>` | rebuild the exact `wrap` command of a past run |
 | `gremlyn arena sessions` | list recorded runs |
 | `gremlyn arena list-gremlins` | describe the gremlins |

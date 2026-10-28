@@ -45,17 +45,22 @@ type watch struct {
 }
 
 type Observer struct {
-	window    time.Duration
-	events    EventSink
-	logger    zerolog.Logger
-	now       func() time.Time
-	mu        sync.Mutex
-	pending   map[string]*watch
-	order     []string
-	injected  int
-	observed  int
-	overrides models.ToolCatalog
-	listed    models.ToolCatalog
+	window       time.Duration
+	events       EventSink
+	logger       zerolog.Logger
+	now          func() time.Time
+	mu           sync.Mutex
+	pending      map[string]*watch
+	order        []string
+	injected     int
+	observed     int
+	overrides    models.ToolCatalog
+	listed       models.ToolCatalog
+	canary       string
+	instructions bool
+	markers      map[string][]string
+	seen         map[string]bool
+	calls        map[string]bool
 }
 
 type ObserverOption func(*Observer)
@@ -80,6 +85,21 @@ func WithAnnotationOverrides(tools map[string]models.ToolAnnotations) ObserverOp
 	}
 }
 
+func WithPayloads(payloads map[string]string) ObserverOption {
+	return func(o *Observer) {
+		o.instructions = o.instructions || len(payloads) > 0
+		for gremlin, text := range payloads {
+			if m := PayloadMarkers(text); len(m) > 0 {
+				o.markers[gremlin] = m
+			}
+		}
+	}
+}
+
+func WithCanary(canary string) ObserverOption {
+	return func(o *Observer) { o.canary = canary }
+}
+
 const DefaultWindow = 30 * time.Second
 
 func NewObserver(events EventSink, logger zerolog.Logger, opts ...ObserverOption) *Observer {
@@ -90,6 +110,9 @@ func NewObserver(events EventSink, logger zerolog.Logger, opts ...ObserverOption
 		now:     time.Now,
 		pending: make(map[string]*watch),
 		listed:  make(models.ToolCatalog),
+		markers: make(map[string][]string),
+		seen:    make(map[string]bool),
+		calls:   make(map[string]bool),
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -126,10 +149,24 @@ func (o *Observer) observe(ctx context.Context, msg *protocol.Message, mctx *pro
 		msg != nil &&
 		msg.Type == protocol.MessageTypeRequest
 
+	isCall := isAgentAction && msg.Request != nil && msg.Request.Method == string(protocol.MCPMethodToolsCall)
+	var argsText, callKey string
+	if isCall && (o.canary != "" || o.instructions) {
+		args := toolArguments(msg)
+		if leak, ok := CanaryInToolCall(messageID(msg), toolName(msg), args, o.canary); ok {
+			o.record(ctx, leak)
+		}
+		if o.instructions {
+			argsText, callKey = argumentsText(args), callDigest(toolName(msg), args)
+		}
+	}
+	seenResult := o.resultText(msg, mctx)
+
 	var resolved []resolution
 
 	o.mu.Lock()
 	now := o.now()
+	o.noteSeenLocked(seenResult)
 
 	live := o.order[:0]
 
@@ -163,10 +200,12 @@ func (o *Observer) observe(ctx context.Context, msg *protocol.Message, mctx *pro
 
 		switch {
 		case method == w.inj.Method && tool != "" && tool == w.tool:
-			resolved = append(resolved, resolution{inj: w.inj, reaction: ReactionRetried, next: tool})
+			resolved = append(resolved, resolution{inj: w.inj, reaction: ReactionRetried, next: tool,
+				payload: o.payloadInLocked(w.inj.GremlinName, argsText), repeated: callKey != "" && o.calls[callKey]})
 			delete(o.pending, id)
 		case method == string(protocol.MCPMethodToolsCall):
-			resolved = append(resolved, resolution{inj: w.inj, reaction: ReactionAdapted, next: tool})
+			resolved = append(resolved, resolution{inj: w.inj, reaction: ReactionAdapted, next: tool,
+				payload: o.payloadInLocked(w.inj.GremlinName, argsText), repeated: callKey != "" && o.calls[callKey]})
 			delete(o.pending, id)
 		default:
 			w.sawActivity = true
@@ -180,6 +219,9 @@ func (o *Observer) observe(ctx context.Context, msg *protocol.Message, mctx *pro
 		}
 	}
 	o.order = kept
+	if callKey != "" {
+		o.calls[callKey] = true
+	}
 
 	o.observed += len(resolved)
 	var tools models.ToolCatalog
@@ -197,6 +239,8 @@ type resolution struct {
 	inj      Injection
 	reaction Reaction
 	next     string
+	payload  string
+	repeated bool
 }
 
 func (o *Observer) Finalize(ctx context.Context, ended bool) Coverage {
@@ -327,7 +371,7 @@ func parseToolList(result json.RawMessage) ([]listedTool, error) {
 }
 
 func (o *Observer) emit(ctx context.Context, r resolution, tools models.ToolCatalog) {
-	event, err := resolvedEvent(r.inj, r.reaction, r.next, tools)
+	event, err := resolvedEvent(r, tools)
 	if err != nil {
 		o.logger.Warn().Err(err).Str("injection", r.inj.ID).Msg("marshalling event details")
 	}
@@ -339,23 +383,30 @@ func (o *Observer) emit(ctx context.Context, r resolution, tools models.ToolCata
 		Int("score", event.Score).
 		Msg("injection resolved")
 
+	o.record(ctx, event)
+}
+
+func (o *Observer) record(ctx context.Context, event models.ArenaEvent) {
 	if o.events == nil {
 		return
 	}
 	if err := o.events.RecordEvent(ctx, event); err != nil {
-		o.logger.Warn().Err(err).Str("injection", r.inj.ID).Msg("recording arena event")
+		o.logger.Warn().Err(err).Str("event", event.ID).Msg("recording arena event")
 	}
 }
 
-func resolvedEvent(inj Injection, r Reaction, next string, tools models.ToolCatalog) (models.ArenaEvent, error) {
+func resolvedEvent(r resolution, tools models.ToolCatalog) (models.ArenaEvent, error) {
+	inj := r.inj
 	details := models.EventDetails{
 		Gremlin:       inj.GremlinName,
-		Reaction:      string(r),
+		Reaction:      string(r.reaction),
 		Tool:          inj.Tool,
 		Method:        inj.Method,
-		NextTool:      next,
+		NextTool:      r.next,
 		ToolSucceeded: inj.Succeeded,
 		Placement:     inj.Placement,
+		NextPayload:   r.payload,
+		NextRepeated:  r.repeated,
 	}
 	outcome, score := classify(inj.GremlinName, &details, tools)
 	event := models.ArenaEvent{
@@ -381,7 +432,14 @@ func classify(gremlin string, d *models.EventDetails, tools models.ToolCatalog) 
 		next = tools.Effect(d.NextTool)
 		d.NextEffect = next
 	}
-	return outcomeFor(gremlin, Reaction(d.Reaction), d.ToolEffect, next, d.ToolSucceeded)
+	c := cueNone
+	switch {
+	case d.NextPayload != "":
+		c = cuePayload
+	case d.NextRepeated:
+		c = cueRepeat
+	}
+	return outcomeFor(gremlin, Reaction(d.Reaction), d.ToolEffect, next, d.ToolSucceeded, c)
 }
 
 func Rescore(events []models.ArenaEvent, tools models.ToolCatalog) []models.ArenaEvent {
@@ -422,6 +480,16 @@ func toolName(msg *protocol.Message) string {
 		return ""
 	}
 	return params.Name
+}
+
+func toolArguments(msg *protocol.Message) []byte {
+	var params struct {
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if json.Unmarshal(msg.Request.Params, &params) != nil {
+		return nil
+	}
+	return params.Arguments
 }
 
 func (c Coverage) String() string {

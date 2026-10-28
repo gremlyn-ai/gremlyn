@@ -133,7 +133,7 @@ func TestBuildGremlinsWithParams_ZeroParamsMatchTheOldDefaults(t *testing.T) {
 }
 
 func TestBuildGremlinsWithParams_StillDeterministic(t *testing.T) {
-	params := GremlinParams{MinDelayMs: 1, MaxDelayMs: 2, PayloadBytes: 4096, MaxLoops: 5}
+	params := GremlinParams{PayloadBytes: 4096, MaxLoops: 5}
 	run := func() []bool {
 		gs, err := BuildGremlinsWithParams([]string{"corruption", "loop", "overflow"},
 			99, IntensityMedium, params)
@@ -221,7 +221,7 @@ func TestGremlinParams_DelayAndWindowAreIndependentlySettable(t *testing.T) {
 func TestBuildGremlinsWithParams_InjectionPlacement(t *testing.T) {
 	_, err := BuildGremlinsWithParams([]string{"timeout"}, 1, IntensityCertain, GremlinParams{InjectionPlacement: "content"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "none of which is in [timeout]")
+	assert.Contains(t, err.Error(), "injection_placement set but no gremlin of this scenario reads it")
 
 	events := &memEvents{}
 	obs := NewObserver(events, zerolog.Nop())
@@ -247,8 +247,11 @@ func TestBuildGremlinsWithParams_ContentPlacementReachesEveryResultRewriter(t *t
 		t.Run(name, func(t *testing.T) {
 			events := &memEvents{}
 			obs := NewObserver(events, zerolog.Nop())
-			gs, err := BuildGremlinsWithParams([]string{name}, 1, IntensityCertain,
-				GremlinParams{InjectionPlacement: "content", PayloadBytes: 64})
+			params := GremlinParams{InjectionPlacement: "content"}
+			if name == "overflow" {
+				params.PayloadBytes = 64
+			}
+			gs, err := BuildGremlinsWithParams([]string{name}, 1, IntensityCertain, params)
 			require.NoError(t, err)
 			feed(t, []step{call(1, "list_notes"), reply(1, okResult), call(2, "list_notes")},
 				NewGremlinHandler(gs, obs, zerolog.Nop()), obs)
@@ -268,5 +271,38 @@ func TestPlacedGremlins_AreExactlyThoseThatPlace(t *testing.T) {
 		require.NoError(t, err)
 		_, ok := gs[0].(placer)
 		assert.Equal(t, slices.Contains(PlacedGremlins(), name), ok, name)
+	}
+}
+
+func TestBuildGremlinsWithParams_RefusesUnreadParams(t *testing.T) {
+	tests := []struct {
+		param   string
+		params  GremlinParams
+		readers []string
+	}{
+		{"min_delay_ms", GremlinParams{MinDelayMs: 1, MaxDelayMs: 2}, []string{"latency"}},
+		{"min_timeout_ms", GremlinParams{MinTimeoutMs: 1, MaxTimeoutMs: 2}, []string{"timeout"}},
+		{"payload_bytes", GremlinParams{PayloadBytes: 64}, []string{"overflow"}},
+		{"max_loops", GremlinParams{MaxLoops: 2}, []string{"loop"}},
+		{"loop_message", GremlinParams{LoopMessage: "again"}, []string{"loop"}},
+		{"fake_tool", GremlinParams{FakeTool: "ghost"}, []string{"hallucination"}},
+		{"injection_text", GremlinParams{InjectionText: "x"}, []string{"injection"}},
+		{"identity_text", GremlinParams{IdentityText: "x"}, []string{"identity"}},
+		{"injection_placement", GremlinParams{InjectionPlacement: "content"}, PlacedGremlins()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.param, func(t *testing.T) {
+			for _, name := range KnownGremlins() {
+				_, err := BuildGremlinsWithParams([]string{name}, 1, IntensityMedium, tt.params)
+				if slices.Contains(tt.readers, name) {
+					assert.NoError(t, err, name)
+					continue
+				}
+				require.Error(t, err, name)
+				assert.Contains(t, err.Error(), tt.param+" set but no gremlin of this scenario reads it")
+			}
+			_, err := BuildGremlinsWithParams(KnownGremlins(), 1, IntensityMedium, tt.params)
+			assert.NoError(t, err, "one reader among the gremlins is enough")
+		})
 	}
 }

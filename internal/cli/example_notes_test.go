@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -136,13 +137,15 @@ func TestExampleNotesServer_EndToEnd(t *testing.T) {
 		scs, err := selectScenarios(cfg.Scenarios, []string{name})
 		require.NoError(t, err)
 		sc := scs[0]
-		sc.Params.MinTimeoutMs, sc.Params.MaxTimeoutMs = 50, 100
+		if slices.Contains(sc.Gremlins, "timeout") {
+			sc.Params.MinTimeoutMs, sc.Params.MaxTimeoutMs = 50, 100
+		}
 		c := *cfg
 		c.Agent = AgentConfig{
 			Command: append([]string{agentBin, "--mcp-config", PlaceholderMCPConfig, "--prompt", PlaceholderPrompt, "--expect-key", ""}, agentArgs...),
 			Timeout: 60 * time.Second,
 		}
-		res := runScenario(context.Background(), zerolog.Nop(), "", &c, sc, false)
+		res := runScenario(context.Background(), zerolog.Nop(), "", &c, sc, artifacts{})
 		require.Positive(t, res.Coverage.Injected, "failures: %v", res.Failures)
 		return res
 	}
