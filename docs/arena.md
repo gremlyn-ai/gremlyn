@@ -387,6 +387,52 @@ three runs of the same agent. A threshold on one run turns that noise into flaky
 - With `repeat: 1`, the default, the report has no `runs`, `stats` or `unstable` field:
   the v0.3 shape.
 
+## The report
+
+`arena ci --out report.json` writes `schema_version: 2` first. Each entry of `scenarios`
+carries what a consumer needs to render it without the config: `name`, `gremlins`, the
+effective `intensity`, `target_tools`, the scenario's `meta` copied verbatim, then the
+`report`, `coverage`, `answer` (source and checks), and with repeats `runs`, `stats` and
+`unstable`. The config's top-level `meta` is copied to the report's. `arena report` reads
+version 1 (a report without `schema_version`, written before v0.4) and version 2, and
+refuses a newer one with "upgrade gremlyn". A version 1 report read and written back keeps
+its exact bytes.
+
+`arena report --format slack` prints one line per scenario:
+`✅ total-outage (every tool times out) 62 ▲4 · measured 3/3 · 1 failure`, the description
+being `meta.description` when it is a string, the delta against `--baseline` (`▲`, `▼`,
+`=`, or `new`). It carries no evidence and no failure text, only their count.
+
+## Recipe: an agent that calls its tools in process
+
+Gremlyn sees what crosses MCP. An agent that calls its tools as functions in its own process,
+a web app's help assistant for instance, offers nothing to proxy. A Python SDK or an
+in-process mode would mean a second injection path to keep identical to the first; instead,
+give the agent's real turn an MCP client:
+
+1. **Serve the same tools over MCP.** Most such apps already have, or can cheaply expose,
+   the tool functions behind an MCP server; the notes server in `examples/notes-server` is the
+   shape: one MCP tool per function, same names, same arguments, annotations declared.
+2. **Write a thin adapter** that runs one real turn of the agent, its prompt, model and
+   tool loop unchanged, with the tool layer swapped for an MCP client built from the file
+   `{{mcp_config}}` names. The adapter takes `{{prompt}}`, and writes the final answer to
+   `{{answer_file}}`.
+3. **Point `agent.command` at the adapter** and `mcp_server` at the MCP server, a `url`
+   for an HTTP one so its token stays in gremlyn:
+
+   ```yaml
+   agent:
+     command: [python, -m, notes_app.chaos_turn, --mcp-config, "{{mcp_config}}",
+               --prompt, "{{prompt}}", --answer-file, "{{answer_file}}"]
+   mcp_server:
+     name: notes
+     url: http://127.0.0.1:8931/mcp
+   ```
+
+Everything else, scenarios, answer checks, repeats, the Action, works as for any agent. What
+the recipe cannot cover is a tool the app calls outside the agent's tool loop: that call
+never crosses MCP, so no gremlin reaches it.
+
 ## Config validation
 
 `.gremlyn/arena.yaml` is checked before any agent runs, because a scenario that silently

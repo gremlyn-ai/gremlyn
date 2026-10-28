@@ -142,7 +142,11 @@ Its body, rendered from the real run above:
 > validation of the result's shape before using it, and a retry when it is invalid.
 > **Fix it:** run `/gremlyn:chaos-test` in Claude Code.
 
-Render any report the same way with `gremlyn arena report report.json --baseline base.json`.
+Render any report the same way with `gremlyn arena report report.json --baseline base.json`,
+or as one line per scenario for a chat channel with `--format slack`
+(`✅ total-outage (every tool times out) 62 ▲4 · measured 3/3`). The report carries each
+scenario's `meta`, `intensity`, `target_tools` and answer checks, so it renders without the
+YAML.
 The full report of this run is in [`docs/demo/report.json`](docs/demo/report.json); the last
 three runs in a row gave identical scores.
 
