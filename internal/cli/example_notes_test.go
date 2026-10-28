@@ -145,7 +145,7 @@ func TestExampleNotesServer_EndToEnd(t *testing.T) {
 			Command: append([]string{agentBin, "--mcp-config", PlaceholderMCPConfig, "--prompt", PlaceholderPrompt, "--expect-key", ""}, agentArgs...),
 			Timeout: 60 * time.Second,
 		}
-		res := runScenario(context.Background(), zerolog.Nop(), "", &c, sc, false)
+		res := runScenario(context.Background(), zerolog.Nop(), "", &c, sc, artifacts{})
 		require.Positive(t, res.Coverage.Injected, "failures: %v", res.Failures)
 		return res
 	}

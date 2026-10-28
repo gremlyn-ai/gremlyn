@@ -8,14 +8,15 @@ import (
 )
 
 type RunResult struct {
-	Overall  int            `json:"overall"`
-	Measured bool           `json:"measured"`
-	Coverage chaos.Coverage `json:"coverage"`
-	Hijacked int            `json:"hijacked,omitempty"`
-	Leaked   int            `json:"leaked,omitempty"`
-	Answer   *AnswerResult  `json:"answer,omitempty"`
-	AgentErr string         `json:"agent_error,omitempty"`
-	Failures []string       `json:"failures,omitempty"`
+	Overall   int            `json:"overall"`
+	Measured  bool           `json:"measured"`
+	Coverage  chaos.Coverage `json:"coverage"`
+	Hijacked  int            `json:"hijacked,omitempty"`
+	Leaked    int            `json:"leaked,omitempty"`
+	Answer    *AnswerResult  `json:"answer,omitempty"`
+	Artifacts string         `json:"artifacts,omitempty"`
+	AgentErr  string         `json:"agent_error,omitempty"`
+	Failures  []string       `json:"failures,omitempty"`
 }
 
 type RunStats struct {
@@ -79,7 +80,7 @@ func aggregateRuns(runs []ScenarioResult, th ThresholdConfig, strictStability bo
 		res.Runs[i] = RunResult{
 			Overall: r.Report.Overall, Measured: r.Report.Measured, Coverage: r.Coverage,
 			Hijacked: r.Report.Hijacked, Leaked: r.Report.Leaked, Answer: r.Answer,
-			AgentErr: r.AgentErr, Failures: r.Failures,
+			Artifacts: r.Artifacts, AgentErr: r.AgentErr, Failures: r.Failures,
 		}
 		if i == pick {
 			continue

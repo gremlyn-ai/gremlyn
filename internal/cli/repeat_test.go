@@ -133,7 +133,7 @@ func TestRunRepeated_SameSeedEveryRun(t *testing.T) {
 	}
 	sc := ScenarioConfig{Name: "repeat", Gremlins: []string{"timeout"}, Seed: 7, Intensity: "certain", Prompt: "read",
 		Params: chaos.GremlinParams{MinTimeoutMs: 50, MaxTimeoutMs: 100}}
-	res := runRepeated(context.Background(), zerolog.Nop(), gremlynBin, cfg, sc, false, 3, false)
+	res := runRepeated(context.Background(), zerolog.Nop(), gremlynBin, cfg, sc, artifacts{}, 3, false)
 	require.Len(t, res.Runs, 3)
 	require.NotNil(t, res.Stats)
 	assert.Equal(t, 3, res.Stats.Measured)
@@ -143,7 +143,7 @@ func TestRunRepeated_SameSeedEveryRun(t *testing.T) {
 		assert.Equal(t, res.Coverage, r.Coverage)
 	}
 
-	single := runRepeated(context.Background(), zerolog.Nop(), gremlynBin, cfg, sc, false, 1, false)
+	single := runRepeated(context.Background(), zerolog.Nop(), gremlynBin, cfg, sc, artifacts{}, 1, false)
 	assert.Nil(t, single.Stats)
 	assert.Empty(t, single.Runs)
 	assert.Equal(t, res.Report.Overall, single.Report.Overall)

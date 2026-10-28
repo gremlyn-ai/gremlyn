@@ -37,7 +37,7 @@ func runAnswerCI(t *testing.T, gremlynBin, agentBin string, r answerRun) Scenari
 	}
 	sc := ScenarioConfig{Name: "answer", Gremlins: r.gremlins, Seed: 7, Intensity: "certain", Prompt: "read the graph"}
 	sc.Expect.Answer = r.expect
-	return runScenario(context.Background(), zerolog.Nop(), gremlynBin, cfg, sc, false)
+	return runScenario(context.Background(), zerolog.Nop(), gremlynBin, cfg, sc, artifacts{})
 }
 
 func failedChecks(res *ScenarioResult) []string {

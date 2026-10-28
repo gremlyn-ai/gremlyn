@@ -141,7 +141,7 @@ func runAimed(t *testing.T, self string, cfg *CIConfig, sc ScenarioConfig, targe
 	dataDir := t.TempDir()
 	t.Setenv("GREMLYN_DATA_DIR", dataDir)
 	sc.TargetTools = targets
-	res = runScenario(context.Background(), zerolog.Nop(), self, cfg, sc, false)
+	res = runScenario(context.Background(), zerolog.Nop(), self, cfg, sc, artifacts{})
 
 	store := readBackStore(t, dataDir)
 	sessions, err := store.ListSessions(context.Background())
