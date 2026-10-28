@@ -61,6 +61,7 @@ func NewArenaReportCmd() *cobra.Command {
 	var (
 		baselinePath string
 		titleOnly    bool
+		format       string
 	)
 	cmd := &cobra.Command{
 		Use:   "report <report.json>",
@@ -83,12 +84,20 @@ func NewArenaReportCmd() *cobra.Command {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), reportTitle(&cur, base))
 				return nil
 			}
-			renderMarkdown(cmd.OutOrStdout(), &cur, base)
+			switch format {
+			case "markdown":
+				renderMarkdown(cmd.OutOrStdout(), &cur, base)
+			case "slack":
+				renderSlack(cmd.OutOrStdout(), &cur, base)
+			default:
+				return fmt.Errorf("unknown --format %q: want markdown or slack", format)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&baselinePath, "baseline", "", "A previous report to compare with, usually from the base branch")
 	cmd.Flags().BoolVar(&titleOnly, "title", false, "Print only the one-line verdict, for a check run title")
+	cmd.Flags().StringVar(&format, "format", "markdown", "markdown (the PR comment) or slack (one line per scenario)")
 	return cmd
 }
 
@@ -101,7 +110,49 @@ func readCIResult(path string) (CIResult, error) {
 	if err := json.Unmarshal(data, &r); err != nil {
 		return r, fmt.Errorf("parsing report %q: %w", path, err)
 	}
+	if r.version() > reportSchemaVersion {
+		return r, fmt.Errorf("report %q has schema_version %d, this gremlyn reads up to %d: upgrade gremlyn",
+			path, r.SchemaVersion, reportSchemaVersion)
+	}
 	return r, nil
+}
+
+func renderSlack(w io.Writer, cur, base *CIResult) {
+	before := baselineScores(base)
+	for i := range cur.Scenarios {
+		s := &cur.Scenarios[i]
+		line := statusIcon(s) + " " + s.Name
+		if d, ok := s.Meta["description"].(string); ok && d != "" {
+			line += " (" + d + ")"
+		}
+		if !s.Report.Measured {
+			line += " not measured"
+		} else {
+			line += fmt.Sprintf(" %d", s.Report.Overall)
+			if base != nil {
+				line += " " + slackDelta(s.Report.Overall, before, s.Name)
+			}
+		}
+		line += fmt.Sprintf(" · measured %d/%d", s.Coverage.Observed, s.Coverage.Injected)
+		if n := len(s.Failures); n > 0 {
+			line += " · " + plural(n, "failure", "failures")
+		}
+		_, _ = fmt.Fprintln(w, line)
+	}
+}
+
+func slackDelta(score int, before map[string]int, name string) string {
+	b, ok := before[name]
+	switch {
+	case !ok:
+		return "new"
+	case score > b:
+		return fmt.Sprintf("▲%d", score-b)
+	case score < b:
+		return fmt.Sprintf("▼%d", b-score)
+	default:
+		return "="
+	}
 }
 
 func baselineScores(base *CIResult) map[string]int {

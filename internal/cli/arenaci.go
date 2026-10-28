@@ -93,16 +93,19 @@ type ThresholdConfig struct {
 }
 
 type ScenarioResult struct {
-	Name     string                   `json:"name"`
-	Gremlins []string                 `json:"gremlins,omitempty"`
-	Report   scoring.ResilienceReport `json:"report"`
-	Coverage chaos.Coverage           `json:"coverage"`
-	Events   int                      `json:"events"`
-	Skipped  int                      `json:"skipped_partial_events"`
-	Upstream chaos.UpstreamStats      `json:"upstream,omitzero"`
-	Tools    models.ToolCatalog       `json:"tools,omitempty"`
-	Targets  []chaos.TargetResult     `json:"targets,omitempty"`
-	Answer   *AnswerResult            `json:"answer,omitempty"`
+	Name        string                   `json:"name"`
+	Gremlins    []string                 `json:"gremlins,omitempty"`
+	Intensity   string                   `json:"intensity,omitempty"`
+	TargetTools []string                 `json:"target_tools,omitempty"`
+	Meta        map[string]any           `json:"meta,omitempty"`
+	Report      scoring.ResilienceReport `json:"report"`
+	Coverage    chaos.Coverage           `json:"coverage"`
+	Events      int                      `json:"events"`
+	Skipped     int                      `json:"skipped_partial_events"`
+	Upstream    chaos.UpstreamStats      `json:"upstream,omitzero"`
+	Tools       models.ToolCatalog       `json:"tools,omitempty"`
+	Targets     []chaos.TargetResult     `json:"targets,omitempty"`
+	Answer      *AnswerResult            `json:"answer,omitempty"`
 
 	Artifacts          string   `json:"artifacts,omitempty"`
 	InjectionFallbacks int      `json:"injection_fallbacks,omitempty"`
@@ -118,9 +121,31 @@ type ScenarioResult struct {
 
 func (r ScenarioResult) Passed() bool { return len(r.Failures) == 0 }
 
+const reportSchemaVersion = 2
+
 type CIResult struct {
-	Scenarios []ScenarioResult `json:"scenarios"`
-	Passed    bool             `json:"passed"`
+	SchemaVersion int              `json:"schema_version,omitempty"`
+	Meta          map[string]any   `json:"meta,omitempty"`
+	Scenarios     []ScenarioResult `json:"scenarios"`
+	Passed        bool             `json:"passed"`
+}
+
+func (r *CIResult) version() int {
+	if r.SchemaVersion == 0 {
+		return 1
+	}
+	return r.SchemaVersion
+}
+
+func newCIResult(cfg *CIConfig) CIResult {
+	return CIResult{SchemaVersion: reportSchemaVersion, Meta: cfg.Meta, Passed: true}
+}
+
+func newScenarioResult(sc ScenarioConfig) ScenarioResult {
+	return ScenarioResult{
+		Name: sc.Name, Gremlins: sc.Gremlins, Intensity: string(intensityOf(sc)),
+		TargetTools: sc.TargetTools, Meta: sc.Meta,
+	}
 }
 
 func NewArenaCICmd(logger zerolog.Logger) *cobra.Command {
@@ -162,7 +187,7 @@ call means no gremlin was crossed and nothing was measured.`,
 			if err != nil {
 				return fmt.Errorf("locating the gremlyn binary: %w", err)
 			}
-			result := CIResult{Passed: true}
+			result := newCIResult(cfg)
 			out := cmd.OutOrStdout()
 			costOut := out
 			if format == "json" {
@@ -424,7 +449,7 @@ func runRepeated(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 }
 
 func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *CIConfig, sc ScenarioConfig, art artifacts) ScenarioResult {
-	res := ScenarioResult{Name: sc.Name, Gremlins: sc.Gremlins}
+	res := newScenarioResult(sc)
 	dir, err := art.mkdir(sc.Name)
 	if err != nil {
 		res.Failures = append(res.Failures, fmt.Sprintf("creating the scenario directory: %v", err))
