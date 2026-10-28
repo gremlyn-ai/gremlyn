@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gremlyn-ai/gremlyn/internal/arena/chaos"
@@ -26,8 +28,15 @@ import (
 )
 
 const (
-	PlaceholderMCPConfig = "{{mcp_config}}"
-	PlaceholderPrompt    = "{{prompt}}"
+	PlaceholderMCPConfig  = "{{mcp_config}}"
+	PlaceholderPrompt     = "{{prompt}}"
+	PlaceholderAnswerFile = "{{answer_file}}"
+)
+
+const (
+	answerSourceFile   = "file"
+	answerSourceStdout = "stdout"
+	answerSourceNone   = "none"
 )
 
 type CIConfig struct {
@@ -64,6 +73,16 @@ type ScenarioConfig struct {
 
 	TargetTools targetTools    `yaml:"target_tools"`
 	Meta        map[string]any `yaml:"meta"`
+	Expect      ExpectConfig   `yaml:"expect"`
+}
+
+type ExpectConfig struct {
+	Answer chaos.AnswerExpect `yaml:"answer"`
+}
+
+type AnswerResult struct {
+	Source string              `json:"source"`
+	Checks []chaos.AnswerCheck `json:"checks,omitempty"`
 }
 
 type ThresholdConfig struct {
@@ -81,6 +100,7 @@ type ScenarioResult struct {
 	Upstream chaos.UpstreamStats      `json:"upstream,omitzero"`
 	Tools    models.ToolCatalog       `json:"tools,omitempty"`
 	Targets  []chaos.TargetResult     `json:"targets,omitempty"`
+	Answer   *AnswerResult            `json:"answer,omitempty"`
 
 	InjectionFallbacks int      `json:"injection_fallbacks,omitempty"`
 	AgentErr           string   `json:"agent_error,omitempty"`
@@ -274,6 +294,9 @@ func validateCIConfig(cfg *CIConfig) error {
 		if err := checkMeta(fmt.Sprintf("scenario %q: meta", sc.Name), sc.Meta); err != nil {
 			return err
 		}
+		if err := sc.Expect.Answer.Validate(); err != nil {
+			return fmt.Errorf("scenario %q: expect.answer: %w", sc.Name, err)
+		}
 
 		gs, err := chaos.BuildGremlinsWithParams(sc.Gremlins, sc.Seed, intensityOf(sc), sc.Params)
 		if err != nil {
@@ -338,6 +361,7 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	eventsPath := filepath.Join(dir, "events.jsonl")
 	summaryPath := filepath.Join(dir, "summary.json")
 	mcpPath := filepath.Join(dir, "mcp.json")
+	answerPath := filepath.Join(dir, "answer.txt")
 
 	seed := sc.Seed
 	if seed == 0 {
@@ -372,16 +396,18 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	defer cancel()
 
 	argv := substitute(cfg.Agent.Command, map[string]string{
-		PlaceholderMCPConfig: mcpPath,
-		PlaceholderPrompt:    sc.Prompt,
+		PlaceholderMCPConfig:  mcpPath,
+		PlaceholderPrompt:     sc.Prompt,
+		PlaceholderAnswerFile: answerPath,
 	})
 
 	agentCmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
 	agentCmd.Env = append(scrubEnv(os.Environ(), hiddenVars), envSlice(cfg.Agent.Env)...)
 	agentCmd.Stdin = nil
-	var agentOut strings.Builder
-	agentCmd.Stdout = &agentOut
-	agentCmd.Stderr = &agentOut
+	var agentOut, agentStdout strings.Builder
+	combined := &lockedWriter{w: &agentOut}
+	agentCmd.Stdout = io.MultiWriter(&agentStdout, combined)
+	agentCmd.Stderr = combined
 
 	logger.Info().Str("scenario", sc.Name).Strs("gremlins", sc.Gremlins).Int64("seed", seed).Msg("running scenario")
 
@@ -418,13 +444,93 @@ func runScenario(ctx context.Context, logger zerolog.Logger, self string, cfg *C
 	res.Coverage = summary.Coverage
 	res.Upstream = summary.Upstream
 	res.Tools = summary.Tools
+
+	var answerFailures []string
+	events, res.Answer, answerFailures = judgeAnswer(logger, sc, seed, events, answerPath, agentStdout.String())
 	res.Report = scoring.Score(chaos.Rescore(events, summary.Tools), nil)
 	res.Targets = chaos.ResolveTargets(summary.Targets, events)
 	res.InjectionFallbacks = injectionFallbacks(events)
 
 	res.Failures = append(res.Failures, upstreamFailures(res.Upstream)...)
 	res.Failures = append(res.Failures, checkThresholds(cfg.Thresholds, res)...)
+	res.Failures = append(res.Failures, answerFailures...)
 	return res
+}
+
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
+func judgeAnswer(
+	logger zerolog.Logger,
+	sc ScenarioConfig,
+	seed int64,
+	events []models.ArenaEvent,
+	answerPath, stdout string,
+) ([]models.ArenaEvent, *AnswerResult, []string) {
+	exp := sc.Expect.Answer
+	canary := sc.Params.CanaryFor(sc.Gremlins, seed)
+	if exp.Empty() && canary == "" {
+		return events, nil, nil
+	}
+	var failures []string
+	text, source := readAnswer(logger, answerPath, stdout)
+	if source == answerSourceNone {
+		events = append(events, chaos.UnreadableAnswer("the agent wrote no "+PlaceholderAnswerFile+" and printed nothing on stdout"))
+		if !exp.Empty() {
+			failures = append(failures, "the agent's answer could not be read (no "+PlaceholderAnswerFile+
+				" written, empty stdout), so its expect.answer checks measured nothing")
+		}
+	} else {
+		checked, err := chaos.CheckAnswer(text, exp, canary)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("checking the answer: %v", err))
+		}
+		events = append(events, checked...)
+	}
+	result := &AnswerResult{Source: source, Checks: chaos.AnswerChecks(events)}
+	for _, c := range result.Checks {
+		if !c.Passed && !c.Unmeasured {
+			failures = append(failures, "answer check failed: "+c.Check)
+		}
+	}
+	return events, result, failures
+}
+
+func readAnswer(logger zerolog.Logger, path, stdout string) (text, source string) {
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		logger.Warn().Err(err).Msg("reading the agent's answer file")
+	}
+	if strings.TrimSpace(string(data)) != "" {
+		return string(data), answerSourceFile
+	}
+	if s := answerFromStdout(stdout); strings.TrimSpace(s) != "" {
+		return s, answerSourceStdout
+	}
+	return "", answerSourceNone
+}
+
+func answerFromStdout(stdout string) string {
+	trimmed := strings.TrimSpace(stdout)
+	lines := strings.Split(trimmed, "\n")
+	for _, candidate := range []string{trimmed, lines[len(lines)-1]} {
+		var r struct {
+			Type   string  `json:"type"`
+			Result *string `json:"result"`
+		}
+		if json.Unmarshal([]byte(candidate), &r) == nil && r.Type == "result" && r.Result != nil {
+			return *r.Result
+		}
+	}
+	return stdout
 }
 
 func upstreamFailures(u chaos.UpstreamStats) []string {
@@ -677,6 +783,23 @@ func writeScenarioText(w io.Writer, sc *ScenarioResult) {
 	for _, t := range sc.Targets {
 		_, _ = fmt.Fprintf(w, "  target:     %s\n", targetLine(t))
 	}
+	if sc.Answer != nil {
+		passed := 0
+		for _, c := range sc.Answer.Checks {
+			if c.Passed {
+				passed++
+			}
+		}
+		_, _ = fmt.Fprintf(w, "  answer:     %s, %d/%d check(s) passed\n", sc.Answer.Source, passed, len(sc.Answer.Checks))
+		for _, c := range sc.Answer.Checks {
+			if !c.Passed && c.Evidence != "" {
+				_, _ = fmt.Fprintf(w, "              %s %s\n", c.Check+":", p.dim(c.Evidence))
+			}
+		}
+	}
+	if sc.Report.Leaked > 0 {
+		_, _ = fmt.Fprintf(w, "  leaked:     %s\n", p.bad(fmt.Sprintf("%d answer check(s) found injected content on its way to the user", sc.Report.Leaked)))
+	}
 	if sc.InjectionFallbacks > 0 {
 		_, _ = fmt.Fprintf(w, "  placement:  %s\n", p.dim(fmt.Sprintf("%d injection(s) fell back to a field: the result had no content array", sc.InjectionFallbacks)))
 	}
@@ -709,6 +832,9 @@ func writeScenarioText(w io.Writer, sc *ScenarioResult) {
 		}
 		if ds.DuplicateWrites > 0 {
 			counts += fmt.Sprintf(", duplicate writes %d", ds.DuplicateWrites)
+		}
+		if ds.Leaked > 0 {
+			counts += fmt.Sprintf(", leaked %d", ds.Leaked)
 		}
 		_, _ = fmt.Fprintf(w, "    %-20s %s  %s\n", dim, p.grade(ds.Grade, fmt.Sprintf("%3d", ds.Score)), p.dim("("+counts+")"))
 	}
