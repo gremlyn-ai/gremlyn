@@ -606,31 +606,36 @@ func (c *cappedBuffer) String() string {
 }
 
 func writeArtifacts(logger zerolog.Logger, dir, agentLog, answer, answerSource string) {
-	if err := writePrivate(filepath.Join(dir, "agent.log"), agentLog); err != nil {
+	if err := writePrivate(dir, "agent.log", agentLog); err != nil {
 		logger.Warn().Err(err).Msg("writing agent.log")
 	}
 	if answerSource != answerSourceStdout {
 		return
 	}
-	if err := writePrivate(filepath.Join(dir, "answer.txt"), answer); err != nil {
+	if err := writePrivate(dir, "answer.txt", answer); err != nil {
 		logger.Warn().Err(err).Msg("writing answer.txt")
 	}
 }
 
-func writePrivate(path, content string) error {
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("replacing %q: %w", path, err)
-	}
-	f, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+func writePrivate(dir, name, content string) error {
+	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return fmt.Errorf("creating %q: %w", path, err)
+		return fmt.Errorf("opening %q: %w", dir, err)
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("replacing %s: %w", name, err)
+	}
+	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("creating %s: %w", name, err)
 	}
 	if _, err := f.WriteString(content); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("writing %q: %w", path, err)
+		return fmt.Errorf("writing %s: %w", name, err)
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("closing %q: %w", path, err)
+		return fmt.Errorf("closing %s: %w", name, err)
 	}
 	return nil
 }
@@ -684,14 +689,20 @@ func readAnswer(logger zerolog.Logger, path, stdout string) (text, source string
 }
 
 func readAnswerFile(path string) ([]byte, error) {
-	info, err := os.Lstat(path)
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, fmt.Errorf("opening the answer file's directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	name := filepath.Base(path)
+	info, err := root.Lstat(name)
 	if err != nil {
 		return nil, fmt.Errorf("stat answer file: %w", err)
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("answer file %q is not a regular file, ignored", path)
 	}
-	f, err := os.Open(filepath.Clean(path))
+	f, err := root.Open(name)
 	if err != nil {
 		return nil, fmt.Errorf("opening answer file: %w", err)
 	}
