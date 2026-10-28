@@ -107,7 +107,9 @@ func suggestKey(key string, known []string) string {
 	best, bestDist := "", -1
 	for _, k := range known {
 		d := editDistance(strings.ToLower(key), k)
-		if d <= 2 && 3*d <= len(key) && (bestDist < 0 || d < bestDist) {
+		near := d <= 2 && 3*d <= len(key)
+		truncated := len(key) >= 4 && strings.HasPrefix(k, strings.ToLower(key))
+		if (near || truncated) && (bestDist < 0 || d < bestDist) {
 			best, bestDist = k, d
 		}
 	}

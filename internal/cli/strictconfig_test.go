@@ -119,6 +119,9 @@ func TestSuggestKey(t *testing.T) {
 		{"target_tool", "target_tools"},
 		{"sed", "seed"},
 		{"Prompt", "prompt"},
+		{"target", "target_tools"},
+		{"wind", "window"},
+		{"na", ""},
 		{"measures", ""},
 		{"x", ""},
 	}
