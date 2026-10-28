@@ -57,7 +57,8 @@ inputs:
       Keep each scenario's directory (agent.log, answer.txt, events.jsonl) under this path
       and upload it as the `gremlyn-artifacts` artifact. Off by default: agent.log holds
       whatever your agent printed, and answer.txt its answer, so turn it on only when that
-      may be read by anyone who can read the workflow's artifacts.
+      may be read by anyone who can read the workflow's artifacts. Use a path outside the
+      checkout, such as $RUNNER_TEMP/gremlyn, so a later git add never commits them.
     required: false
     default: ""
   github-token:
