@@ -471,6 +471,15 @@ names an HTTP server by its scheme and host only; header values are never record
 are appended to `events.jsonl` and synced one by one, so a proxy killed
 outright keeps every observation it made; its record just stays `running`.
 
+`arena ci` gives each scenario run a directory: `mcp.json`, `events.jsonl`, `summary.json`,
+`agent.log` (the agent's stdout and stderr, as it printed them) and `answer.txt` (the answer
+the oracle read: the agent writes it through `{{answer_file}}`, or `arena ci` writes it from
+stdout). The files are `0600`. The directory is removed when the scenario ends unless
+`--keep-artifacts`, or `--artifacts-dir <path>`, which keeps it under `<path>` (created
+`0700`) as `<scenario>-<random>`, one per repeat, for a CI job to upload. The report names
+it in `artifacts` (and in each `runs[]` entry); the logs never enter the JSON, because they
+may hold the user's data.
+
 History lives under `~/.gremlyn/arena/sessions/`, one directory per run with `session.json`
 and `events.jsonl`. `gremlyn arena sessions` lists it. Delete a folder to drop a run.
 

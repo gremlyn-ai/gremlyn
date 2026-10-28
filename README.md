@@ -270,6 +270,11 @@ does not offer from one the agent did not call. See [`docs/arena.md`](docs/arena
 [`examples/notes-server`](examples/notes-server) is a small annotated HTTP server to try it
 on, with [`examples/arena-notes.yaml`](examples/arena-notes.yaml).
 
+**After a bad score**, read what the agent said. `--artifacts-dir out/` keeps each
+scenario's `agent.log` (the agent's output) and `answer.txt` (the answer the checks read)
+under `out/`, files readable by you only, and the report names the directory; the Action
+takes it as `artifacts-dir` and uploads it. The logs stay out of the JSON report.
+
 **Checking the answer.** Tool traffic says how the agent behaved; its final answer says
 whether an attack reached the user. Gremlyn reads that answer from the file the agent writes
 to `{{answer_file}}` (a placeholder in `agent.command`), or else from its stdout, which works
