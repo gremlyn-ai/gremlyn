@@ -45,21 +45,22 @@ type watch struct {
 }
 
 type Observer struct {
-	window    time.Duration
-	events    EventSink
-	logger    zerolog.Logger
-	now       func() time.Time
-	mu        sync.Mutex
-	pending   map[string]*watch
-	order     []string
-	injected  int
-	observed  int
-	overrides models.ToolCatalog
-	listed    models.ToolCatalog
-	canary    string
-	markers   map[string][]string
-	seen      map[string]bool
-	calls     map[string]bool
+	window       time.Duration
+	events       EventSink
+	logger       zerolog.Logger
+	now          func() time.Time
+	mu           sync.Mutex
+	pending      map[string]*watch
+	order        []string
+	injected     int
+	observed     int
+	overrides    models.ToolCatalog
+	listed       models.ToolCatalog
+	canary       string
+	instructions bool
+	markers      map[string][]string
+	seen         map[string]bool
+	calls        map[string]bool
 }
 
 type ObserverOption func(*Observer)
@@ -86,6 +87,7 @@ func WithAnnotationOverrides(tools map[string]models.ToolAnnotations) ObserverOp
 
 func WithPayloads(payloads map[string]string) ObserverOption {
 	return func(o *Observer) {
+		o.instructions = o.instructions || len(payloads) > 0
 		for gremlin, text := range payloads {
 			if m := PayloadMarkers(text); len(m) > 0 {
 				o.markers[gremlin] = m
@@ -149,19 +151,22 @@ func (o *Observer) observe(ctx context.Context, msg *protocol.Message, mctx *pro
 
 	isCall := isAgentAction && msg.Request != nil && msg.Request.Method == string(protocol.MCPMethodToolsCall)
 	var argsText, callKey string
-	if isCall {
+	if isCall && (o.canary != "" || o.instructions) {
 		args := toolArguments(msg)
 		if leak, ok := CanaryInToolCall(messageID(msg), toolName(msg), args, o.canary); ok {
 			o.record(ctx, leak)
 		}
-		argsText, callKey = argumentsText(args), toolName(msg)+"\x00"+canonicalArguments(args)
+		if o.instructions {
+			argsText, callKey = argumentsText(args), callDigest(toolName(msg), args)
+		}
 	}
+	seenResult := o.resultText(msg, mctx)
 
 	var resolved []resolution
 
 	o.mu.Lock()
 	now := o.now()
-	o.noteSeenLocked(msg, mctx)
+	o.noteSeenLocked(seenResult)
 
 	live := o.order[:0]
 
@@ -196,11 +201,11 @@ func (o *Observer) observe(ctx context.Context, msg *protocol.Message, mctx *pro
 		switch {
 		case method == w.inj.Method && tool != "" && tool == w.tool:
 			resolved = append(resolved, resolution{inj: w.inj, reaction: ReactionRetried, next: tool,
-				payload: o.payloadInLocked(w.inj.GremlinName, argsText), repeated: o.calls[callKey]})
+				payload: o.payloadInLocked(w.inj.GremlinName, argsText), repeated: callKey != "" && o.calls[callKey]})
 			delete(o.pending, id)
 		case method == string(protocol.MCPMethodToolsCall):
 			resolved = append(resolved, resolution{inj: w.inj, reaction: ReactionAdapted, next: tool,
-				payload: o.payloadInLocked(w.inj.GremlinName, argsText), repeated: o.calls[callKey]})
+				payload: o.payloadInLocked(w.inj.GremlinName, argsText), repeated: callKey != "" && o.calls[callKey]})
 			delete(o.pending, id)
 		default:
 			w.sawActivity = true
@@ -214,7 +219,7 @@ func (o *Observer) observe(ctx context.Context, msg *protocol.Message, mctx *pro
 		}
 	}
 	o.order = kept
-	if isCall {
+	if callKey != "" {
 		o.calls[callKey] = true
 	}
 

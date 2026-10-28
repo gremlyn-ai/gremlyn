@@ -1,7 +1,8 @@
 package chaos
 
 import (
-	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"regexp"
 	"slices"
@@ -13,7 +14,7 @@ import (
 )
 
 var (
-	quotedPattern = regexp.MustCompile("\"([^\"\\n]{3,200})\"|`([^`\\n]{3,200})`|\u201c([^\u201d\\n]{3,200})\u201d")
+	quotedPattern = regexp.MustCompile("\"([^\"\\n]{4,200})\"|`([^`\\n]{4,200})`|\u201c([^\u201d\\n]{4,200})\u201d")
 	canaryPattern = regexp.MustCompile(`GRM-[0-9a-f]{8}`)
 )
 
@@ -40,15 +41,40 @@ func PayloadMarkers(text string) []string {
 	return out
 }
 
-func (o *Observer) noteSeenLocked(msg *protocol.Message, mctx *proxy.MessageContext) {
+func MarkerIn(text, marker string) bool {
+	for i := 0; ; {
+		j := strings.Index(text[i:], marker)
+		if j < 0 {
+			return false
+		}
+		start, end := i+j, i+j+len(marker)
+		if (start == 0 || !wordByte(text[start-1]) || !wordByte(marker[0])) &&
+			(end == len(text) || !wordByte(text[end]) || !wordByte(marker[len(marker)-1])) {
+			return true
+		}
+		i = start + 1
+	}
+}
+
+func wordByte(b byte) bool {
+	return b == '_' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+}
+
+func (o *Observer) resultText(msg *protocol.Message, mctx *proxy.MessageContext) string {
 	if len(o.markers) == 0 || mctx == nil || mctx.Direction != models.DirectionIncoming ||
 		msg == nil || msg.Type != protocol.MessageTypeResponse || msg.Response == nil || len(msg.Response.Result) == 0 {
+		return ""
+	}
+	return argumentsText(msg.Response.Result)
+}
+
+func (o *Observer) noteSeenLocked(text string) {
+	if text == "" {
 		return
 	}
-	lower := bytes.ToLower(msg.Response.Result)
 	for _, ms := range o.markers {
 		for _, m := range ms {
-			if !o.seen[m] && bytes.Contains(lower, []byte(m)) {
+			if !o.seen[m] && strings.Contains(text, m) {
 				o.seen[m] = true
 			}
 		}
@@ -60,7 +86,7 @@ func (o *Observer) payloadInLocked(gremlin, argsText string) string {
 		return ""
 	}
 	for _, m := range o.markers[gremlin] {
-		if !o.seen[m] && strings.Contains(argsText, m) {
+		if !o.seen[m] && MarkerIn(argsText, m) {
 			return m
 		}
 	}
@@ -91,6 +117,11 @@ func argumentsText(args json.RawMessage) string {
 	}
 	walk(v)
 	return b.String()
+}
+
+func callDigest(tool string, args json.RawMessage) string {
+	sum := sha256.Sum256([]byte(tool + "\x00" + canonicalArguments(args)))
+	return hex.EncodeToString(sum[:])
 }
 
 func canonicalArguments(args json.RawMessage) string {
