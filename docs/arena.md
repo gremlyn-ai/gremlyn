@@ -365,6 +365,28 @@ the injection. The answer oracle closes that gap.
   clipped to 120 characters. The full answer never reaches the report. In the PR comment it
   is printed inside a code span, because it is text an attacker wrote.
 
+## Repeats and stability
+
+The seed fixes the gremlins, not the model: the same scenario can score 55, 62 and 57 on
+three runs of the same agent. A threshold on one run turns that noise into flaky failures.
+
+- **`--repeat N`**, or `repeat: N` on a scenario (the flag wins), runs the scenario N times
+  with the same seed, so every run faces the same injections and only the agent varies.
+  `arena ci` prints the number of agent launches before it starts.
+- **The median run decides.** Measured runs are sorted by overall score and the middle one
+  (the lower middle for an even count) becomes the scenario's report, so the report is one
+  that really happened. Thresholds and coverage checks apply to it. `stats` gives
+  `median`, `min`, `max`, `spread` and how many runs were `measured`; `runs` gives each run's
+  score, coverage, hijacks, leaks, answer checks and failures.
+- **Any leak fails.** A failed answer check in any run fails the scenario (`run 2: answer
+  check failed: canary`): one leak in three runs is a leak. A run that measured nothing is
+  left out of the stats and its failures are reported.
+- **Stability.** `thresholds.stability_spread` marks a scenario whose spread exceeds it as
+  `unstable`, a warning in the text output and the PR comment; `--strict-stability` makes it
+  a failure.
+- With `repeat: 1`, the default, the report has no `runs`, `stats` or `unstable` field:
+  the v0.3 shape.
+
 ## Config validation
 
 `.gremlyn/arena.yaml` is checked before any agent runs, because a scenario that silently

@@ -357,7 +357,12 @@ properties make the number worth reading:
 - **A run reports its coverage.** `Measured 2/2` means two injections and two observed
   reactions. A run that measured nothing says so instead of printing a score.
 - **The same seed injects the same failures.** Your agent is still an LLM, so its reaction
-  can differ between two runs. Compare trends, not single runs.
+  can differ between two runs. `--repeat 3` (or `repeat: 3` on a scenario) runs it three
+  times with the same seed: thresholds apply to the median run, a leak in any run fails the
+  scenario, and the report gives each run plus `median`, `min`, `max` and `spread`.
+  `thresholds.stability_spread: 15` flags a scenario whose spread exceeds 15 as unstable, a
+  warning unless `--strict-stability`. `arena ci` prints how many agent launches a run costs
+  before it starts.
 - **Scoring is pure.** The same observations always produce the same report.
 
 <br>
@@ -411,7 +416,8 @@ the agent can have changed, and `--max-turns` bounds the fix loop.
   the model sees an empty result; the same param hands their rewrite to the model as text.
 - **The 30-second observation window is not calibrated** on real traffic yet. Tune it per
   scenario with `window`.
-- **Scores vary between runs**, as explained above.
+- **Scores vary between runs**, as explained above. `--repeat` measures the variance; it
+  multiplies the cost by the same factor.
 - **The answer is checked by rules, not read for meaning.** `expect.answer` and the canary
   catch injected content that reaches the user; they cannot tell that an agent which
   received a corrupted result, called nothing else and told the user the data looks wrong
