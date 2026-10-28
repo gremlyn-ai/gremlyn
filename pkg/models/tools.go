@@ -107,6 +107,10 @@ func (e ToolEffect) Destructive() bool {
 	return e == EffectDestructive || e == EffectNonIdempotentDestructive
 }
 
+func (e ToolEffect) Writes() bool {
+	return e.Known() && e != EffectReadOnly
+}
+
 func (e ToolEffect) NonIdempotentWrite() bool {
 	return e == EffectNonIdempotentWrite || e == EffectNonIdempotentDestructive
 }
@@ -121,6 +125,8 @@ type EventDetails struct {
 	ToolEffect    ToolEffect `json:"tool_effect,omitempty"`
 	NextEffect    ToolEffect `json:"next_effect,omitempty"`
 	Placement     string     `json:"placement,omitempty"`
+	NextPayload   string     `json:"next_payload,omitempty"`
+	NextRepeated  bool       `json:"next_repeated,omitempty"`
 	Check         string     `json:"check,omitempty"`
 	Evidence      string     `json:"evidence,omitempty"`
 }

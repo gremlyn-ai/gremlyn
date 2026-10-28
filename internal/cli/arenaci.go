@@ -294,6 +294,9 @@ func validateCIConfig(cfg *CIConfig) error {
 		if err := checkMeta(fmt.Sprintf("scenario %q: meta", sc.Name), sc.Meta); err != nil {
 			return err
 		}
+		if err := checkPromptAgainstPayload(sc); err != nil {
+			return err
+		}
 		if err := sc.Expect.Answer.Validate(); err != nil {
 			return fmt.Errorf("scenario %q: expect.answer: %w", sc.Name, err)
 		}
@@ -310,6 +313,19 @@ func validateCIConfig(cfg *CIConfig) error {
 	}
 	if cfg.Agent.Timeout <= 0 {
 		cfg.Agent.Timeout = 5 * time.Minute
+	}
+	return nil
+}
+
+func checkPromptAgainstPayload(sc ScenarioConfig) error {
+	prompt := strings.ToLower(sc.Prompt)
+	for gremlin, text := range sc.Params.Payloads(sc.Gremlins, 0) {
+		for _, m := range chaos.PayloadMarkers(text) {
+			if strings.Contains(prompt, m) {
+				return fmt.Errorf("scenario %q: the prompt names %q, which the %s text also names: "+
+					"the rubric could not tell obeying the injection from doing the task, so change one of them", sc.Name, m, gremlin)
+			}
+		}
 	}
 	return nil
 }

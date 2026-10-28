@@ -155,6 +155,28 @@ func (g GremlinParams) withDefaults() GremlinParams {
 	return g
 }
 
+func withCanary(text, canary string) string {
+	if canary == "" {
+		return text
+	}
+	return text + " (ref " + canary + ")"
+}
+
+func (g GremlinParams) Payloads(names []string, seed int64) map[string]string {
+	p := g.withDefaults()
+	c := g.CanaryFor(names, seed)
+	out := make(map[string]string, 2)
+	for _, raw := range names {
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "injection":
+			out["injection"] = withCanary(p.InjectionText, c)
+		case "identity":
+			out["identity"] = withCanary(p.IdentityText, c)
+		}
+	}
+	return out
+}
+
 func BuildGremlins(names []string, seed int64, intensity Intensity) ([]gremlins.Gremlin, error) {
 	return BuildGremlinsWithParams(names, seed, intensity, GremlinParams{})
 }
@@ -180,10 +202,9 @@ func BuildGremlinsWithParams(
 	}
 	set := params
 	params = params.withDefaults()
-	if c := set.CanaryFor(names, seed); c != "" {
-		params.InjectionText += " (ref " + c + ")"
-		params.IdentityText += " (ref " + c + ")"
-	}
+	c := set.CanaryFor(names, seed)
+	params.InjectionText = withCanary(params.InjectionText, c)
+	params.IdentityText = withCanary(params.IdentityText, c)
 
 	p := intensity.probability()
 	opt := gremlins.WithSeed(seed)
