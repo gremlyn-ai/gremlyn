@@ -8,6 +8,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWrapCmd_NoArgs(t *testing.T) {
@@ -50,6 +51,25 @@ func TestSessionEndedNormally(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, sessionEndedNormally(tt.runErr, tt.ctxErr, tt.signaled))
+		})
+	}
+}
+
+func TestWrapCmd_ChaosParamsAreStrict(t *testing.T) {
+	tests := []struct{ name, params, wantErr string }{
+		{"unknown field", `{"injection_txt":"x"}`, `unknown field "injection_txt"`},
+		{"param no gremlin reads", `{"payload_bytes":64}`, "payload_bytes set but no gremlin of this scenario reads it"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := NewWrapCmd(zerolog.Nop())
+			buf := &bytes.Buffer{}
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			cmd.SetArgs([]string{"--chaos-gremlins", "injection", "--chaos-params", tt.params, "--", "true"})
+			err := cmd.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }

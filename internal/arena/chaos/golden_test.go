@@ -82,9 +82,18 @@ func goldenRuns() [][]string {
 
 func buildGolden(t *testing.T, names []string, intensity Intensity) []gremlins.Gremlin {
 	t.Helper()
-	gs, err := BuildGremlinsWithParams(names, 42, intensity, GremlinParams{
-		MinDelayMs: 1, MaxDelayMs: 2, MinTimeoutMs: 1, MaxTimeoutMs: 2, PayloadBytes: 256,
-	})
+	var params GremlinParams
+	for _, name := range names {
+		switch name {
+		case "latency":
+			params.MinDelayMs, params.MaxDelayMs = 1, 2
+		case "timeout":
+			params.MinTimeoutMs, params.MaxTimeoutMs = 1, 2
+		case "overflow":
+			params.PayloadBytes = 256
+		}
+	}
+	gs, err := BuildGremlinsWithParams(names, 42, intensity, params)
 	require.NoError(t, err)
 	return gs
 }

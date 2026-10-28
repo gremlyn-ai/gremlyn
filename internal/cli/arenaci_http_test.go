@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -185,10 +186,11 @@ func httpCIConfig(agentBin, mode, url string) *CIConfig {
 }
 
 func httpScenario(name string, gremlins ...string) ScenarioConfig {
-	return ScenarioConfig{
-		Name: name, Gremlins: gremlins, Seed: 7, Intensity: "certain", Prompt: "read the graph",
-		Params: chaos.GremlinParams{MinTimeoutMs: 50, MaxTimeoutMs: 100},
+	sc := ScenarioConfig{Name: name, Gremlins: gremlins, Seed: 7, Intensity: "certain", Prompt: "read the graph"}
+	if slices.Contains(gremlins, "timeout") {
+		sc.Params = chaos.GremlinParams{MinTimeoutMs: 50, MaxTimeoutMs: 100}
 	}
+	return sc
 }
 
 func isolateRunFiles(t *testing.T) (dataDir, tmpDir, token string) {
