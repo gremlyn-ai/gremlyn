@@ -287,6 +287,25 @@ that scenario's first delta against `main` compares two different measurements.
 **Known limit.** When the agent sends parallel tool calls, a sibling call sent right after a
 `hallucination` request reads as `adapted` before the agent saw any error.
 
+## Config validation
+
+`.gremlyn/arena.yaml` is checked before any agent runs, because a scenario that silently
+lost a key still runs and can pass without the constraint it was written for.
+
+- **Unknown keys are refused**, at every level, with the line, the path
+  (`scenarios[0].target_tool`) and the closest known key when one is within two edits.
+  `meta:` (top level and per scenario) is the one free-form map; its keys must be strings,
+  since it is copied into the JSON report.
+- **A param no gremlin of the scenario reads is refused**: `payload_bytes` on an `injection`
+  scenario, `min_timeout_ms` without `timeout`. The table of which gremlin reads which param
+  is `GremlinParams.unread` in `chaos/build.go`; `wrap --chaos-params` goes through the same
+  check, and refuses an unknown JSON field.
+- **`thresholds.min_dimension` takes dimension names** (`injection_defense`, not
+  `injection`); an unknown one is refused instead of failing every scenario as unexercised.
+
+A config that loaded under v0.3 may be refused from v0.4 on. The error names the key and the
+fix: correct the typo, delete the stray param, or move your own data under `meta:`.
+
 ## Invariants
 
 Breaking one of these silently produces numbers nobody can trust.
@@ -403,6 +422,8 @@ process list.
 
 - Implement `gremlins.Gremlin` and register it in `chaos.KnownGremlins` and `chaos.buildOne`.
 - Map it in `scoring.GremlinToDimension`, or its events are discarded.
+- A new `GremlinParams` field gets its readers in `GremlinParams.unread`, so setting it on a
+  scenario without that gremlin is refused.
 - Give it its own case in `chaos.outcomeFor` if a reaction means something different for it,
   including after a write: say whether the call it targets still reaches the server.
 - Test the injected path, the not-injected path byte for byte, a message kind it must

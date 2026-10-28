@@ -211,6 +211,12 @@ never called a tool fails**, because nothing was injected and nothing was measur
 `gremlyn arena ci --scenario <name>`. Delays, payload sizes, the injected text and the
 observation `window` can be set per scenario; see [`.gremlyn/arena.yaml`](.gremlyn/arena.yaml).
 
+**The file is strict.** An unknown key is refused with its line and the closest known key
+(`scenarios[0].intesity: unknown key, did you mean "intensity"?`), and so is a `params`
+entry no gremlin of the scenario reads, so a typo cannot quietly drop a constraint and turn
+a scenario green. Your own data goes under `meta:`, at the top level or per scenario: it is
+free-form and never checked.
+
 **A remote server over Streamable HTTP** takes a `url` instead of a `command`, and the
 headers it needs:
 
