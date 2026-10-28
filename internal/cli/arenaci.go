@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -32,6 +35,7 @@ type CIConfig struct {
 	MCPServer  MCPServerConfig  `yaml:"mcp_server"`
 	Scenarios  []ScenarioConfig `yaml:"scenarios"`
 	Thresholds ThresholdConfig  `yaml:"thresholds"`
+	Meta       map[string]any   `yaml:"meta"`
 }
 
 type AgentConfig struct {
@@ -58,7 +62,8 @@ type ScenarioConfig struct {
 	Params    chaos.GremlinParams `yaml:"params"`
 	Window    time.Duration       `yaml:"window"`
 
-	TargetTools targetTools `yaml:"target_tools"`
+	TargetTools targetTools    `yaml:"target_tools"`
+	Meta        map[string]any `yaml:"meta"`
 }
 
 type ThresholdConfig struct {
@@ -199,8 +204,17 @@ func loadCIConfig(path string) (*CIConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading %q: %w", path, err)
 	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("parsing %q: %w", path, err)
+	}
+	if err := checkKeys(&doc, reflect.TypeFor[CIConfig](), ""); err != nil {
+		return nil, fmt.Errorf("invalid config %q: %w", path, err)
+	}
 	var cfg CIConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing %q: %w", path, err)
 	}
 	if err := validateCIConfig(&cfg); err != nil {
@@ -236,6 +250,14 @@ func validateCIConfig(cfg *CIConfig) error {
 	if len(cfg.Scenarios) == 0 {
 		return errors.New("at least one scenario is required")
 	}
+	if err := checkMeta("meta", cfg.Meta); err != nil {
+		return err
+	}
+	for dim := range cfg.Thresholds.MinDimension {
+		if !slices.Contains(scoring.AllDimensions, dim) {
+			return fmt.Errorf("thresholds.min_dimension: unknown dimension %q (known: %s)", dim, dimensionNames())
+		}
+	}
 	for i, sc := range cfg.Scenarios {
 		if sc.Name == "" {
 			return fmt.Errorf("scenarios[%d]: name is required", i)
@@ -248,6 +270,9 @@ func validateCIConfig(cfg *CIConfig) error {
 		}
 		if sc.Intensity != "" && !chaos.Intensity(sc.Intensity).Valid() {
 			return fmt.Errorf("scenario %q: unknown intensity %q", sc.Name, sc.Intensity)
+		}
+		if err := checkMeta(fmt.Sprintf("scenario %q: meta", sc.Name), sc.Meta); err != nil {
+			return err
 		}
 
 		gs, err := chaos.BuildGremlinsWithParams(sc.Gremlins, sc.Seed, intensityOf(sc), sc.Params)
@@ -264,6 +289,21 @@ func validateCIConfig(cfg *CIConfig) error {
 		cfg.Agent.Timeout = 5 * time.Minute
 	}
 	return nil
+}
+
+func checkMeta(where string, meta map[string]any) error {
+	if _, err := json.Marshal(meta); err != nil {
+		return fmt.Errorf("%s must hold plain values with string keys, it is copied into the JSON report: %w", where, err)
+	}
+	return nil
+}
+
+func dimensionNames() string {
+	names := make([]string, len(scoring.AllDimensions))
+	for i, d := range scoring.AllDimensions {
+		names[i] = string(d)
+	}
+	return strings.Join(names, ", ")
 }
 
 func intensityOf(sc ScenarioConfig) chaos.Intensity {
