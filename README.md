@@ -117,7 +117,7 @@ permissions:
 
 steps:
   - uses: actions/checkout@v4
-  - uses: gremlyn-ai/gremlyn/action@v0.3.1
+  - uses: gremlyn-ai/gremlyn/action@v0.4.0
     with:
       config: .gremlyn/arena.yaml
 ```
