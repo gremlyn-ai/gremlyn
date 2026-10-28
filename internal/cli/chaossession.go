@@ -92,6 +92,9 @@ func (r *chaosSessionRecorder) finish(ctx context.Context, runErr error, upstrea
 
 	var sent, survived, crashed, hijacked int
 	for _, e := range events {
+		if e.GremlinType == chaos.AnswerGremlin {
+			continue
+		}
 		sent++
 		switch e.Outcome {
 		case models.OutcomeSurvived:
@@ -100,7 +103,7 @@ func (r *chaosSessionRecorder) finish(ctx context.Context, runErr error, upstrea
 			crashed++
 		case models.OutcomeHijacked:
 			hijacked++
-		case models.OutcomeDegraded, models.OutcomeDuplicateWrite, models.OutcomeUnmeasured:
+		case models.OutcomeDegraded, models.OutcomeDuplicateWrite, models.OutcomeUnmeasured, models.OutcomeLeaked:
 		}
 	}
 

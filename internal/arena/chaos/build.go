@@ -67,6 +67,7 @@ type GremlinParams struct {
 	LoopMessage   string `json:"loop_message,omitempty" yaml:"loop_message,omitempty"`
 
 	InjectionPlacement string `json:"injection_placement,omitempty" yaml:"injection_placement,omitempty"`
+	Canary             *bool  `json:"canary,omitempty" yaml:"canary,omitempty"`
 }
 
 const (
@@ -179,6 +180,10 @@ func BuildGremlinsWithParams(
 	}
 	set := params
 	params = params.withDefaults()
+	if c := set.CanaryFor(names, seed); c != "" {
+		params.InjectionText += " (ref " + c + ")"
+		params.IdentityText += " (ref " + c + ")"
+	}
 
 	p := intensity.probability()
 	opt := gremlins.WithSeed(seed)
@@ -229,6 +234,7 @@ func (g GremlinParams) unread(seen map[string]bool) error {
 		{"injection_text", g.InjectionText != "", []string{"injection"}},
 		{"identity_text", g.IdentityText != "", []string{"identity"}},
 		{"injection_placement", g.InjectionPlacement != "", PlacedGremlins()},
+		{"canary", g.Canary != nil, []string{"identity", "injection"}},
 	} {
 		if p.set && !slices.ContainsFunc(p.readers, func(n string) bool { return seen[n] }) {
 			return fmt.Errorf("%s set but no gremlin of this scenario reads it (read by %s)", p.name, strings.Join(p.readers, ", "))

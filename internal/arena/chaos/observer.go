@@ -56,6 +56,7 @@ type Observer struct {
 	observed  int
 	overrides models.ToolCatalog
 	listed    models.ToolCatalog
+	canary    string
 }
 
 type ObserverOption func(*Observer)
@@ -78,6 +79,10 @@ func WithAnnotationOverrides(tools map[string]models.ToolAnnotations) ObserverOp
 			o.overrides[name] = models.ToolRecord{Annotations: ann, Source: models.AnnotationSourceConfig}
 		}
 	}
+}
+
+func WithCanary(canary string) ObserverOption {
+	return func(o *Observer) { o.canary = canary }
 }
 
 const DefaultWindow = 30 * time.Second
@@ -125,6 +130,12 @@ func (o *Observer) observe(ctx context.Context, msg *protocol.Message, mctx *pro
 		mctx.Direction == models.DirectionOutgoing &&
 		msg != nil &&
 		msg.Type == protocol.MessageTypeRequest
+
+	if isAgentAction && msg.Request != nil && msg.Request.Method == string(protocol.MCPMethodToolsCall) {
+		if leak, ok := CanaryInToolCall(messageID(msg), toolName(msg), toolArguments(msg), o.canary); ok {
+			o.record(ctx, leak)
+		}
+	}
 
 	var resolved []resolution
 
@@ -339,11 +350,15 @@ func (o *Observer) emit(ctx context.Context, r resolution, tools models.ToolCata
 		Int("score", event.Score).
 		Msg("injection resolved")
 
+	o.record(ctx, event)
+}
+
+func (o *Observer) record(ctx context.Context, event models.ArenaEvent) {
 	if o.events == nil {
 		return
 	}
 	if err := o.events.RecordEvent(ctx, event); err != nil {
-		o.logger.Warn().Err(err).Str("injection", r.inj.ID).Msg("recording arena event")
+		o.logger.Warn().Err(err).Str("event", event.ID).Msg("recording arena event")
 	}
 }
 
@@ -422,6 +437,16 @@ func toolName(msg *protocol.Message) string {
 		return ""
 	}
 	return params.Name
+}
+
+func toolArguments(msg *protocol.Message) []byte {
+	var params struct {
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if json.Unmarshal(msg.Request.Params, &params) != nil {
+		return nil
+	}
+	return params.Arguments
 }
 
 func (c Coverage) String() string {

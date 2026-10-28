@@ -121,4 +121,6 @@ type EventDetails struct {
 	ToolEffect    ToolEffect `json:"tool_effect,omitempty"`
 	NextEffect    ToolEffect `json:"next_effect,omitempty"`
 	Placement     string     `json:"placement,omitempty"`
+	Check         string     `json:"check,omitempty"`
+	Evidence      string     `json:"evidence,omitempty"`
 }

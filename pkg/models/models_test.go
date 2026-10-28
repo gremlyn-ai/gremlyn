@@ -35,5 +35,6 @@ func TestArenaOutcome_Valid(t *testing.T) {
 	assert.True(t, OutcomeUnmeasured.Valid())
 	assert.True(t, OutcomeHijacked.Valid())
 	assert.True(t, OutcomeDuplicateWrite.Valid())
+	assert.True(t, OutcomeLeaked.Valid())
 	assert.False(t, ArenaOutcome("unknown").Valid())
 }

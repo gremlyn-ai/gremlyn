@@ -85,7 +85,7 @@ func reconstructEvents(t *testing.T, gremlin string, ds scoring.DimensionScore, 
 				degr++
 			case models.OutcomeCrashed:
 				crash++
-			case models.OutcomeUnmeasured, models.OutcomeHijacked, models.OutcomeDuplicateWrite:
+			case models.OutcomeUnmeasured, models.OutcomeHijacked, models.OutcomeDuplicateWrite, models.OutcomeLeaked:
 			}
 			sum += v.score
 			events = append(events, models.ArenaEvent{
